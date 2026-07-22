@@ -193,6 +193,14 @@ void FindBestCutoff(TreeSamples &tree_samples, StaticPropRange initial_static_pr
     freq[prp-min_prop][tree_samples.Token(0, i)]++;
   }
 
+  std::vector<std::vector<std::pair<int32_t, int32_t>>> freq1(max_prop-min_prop + 1);
+  for (int32_t i = 0; i < max_prop + 1; i++) {
+    for (int32_t j = 0; j < max_symbols; j++) {
+      if (freq[i][j]>0) freq1[i].push_back({j, freq[i][j]});
+    }
+  }
+
+
   std::vector<float> dp(max_prop-min_prop+1, 0);
   std::vector<int32_t> opt_split(max_prop-min_prop+1);
 
@@ -206,17 +214,28 @@ void FindBestCutoff(TreeSamples &tree_samples, StaticPropRange initial_static_pr
       residual_histogramm[k] += freq[i][k];
       tot_samples += freq[i][k];
     }
-    dp[i] = EstimateBits(residual_histogramm.data(), max_symbols) + split_cost;
-    // if(tot_samples > 0) std:: cerr << "[" << dp[i]-split_cost << ' ' << tot_samples << "] ";
+
+    float curr_split_cost = EstimateBits(residual_histogramm.data(), max_symbols);
+
+    dp[i] = curr_split_cost + split_cost;
     if(i > 0) dp[i] += dp[i-1] + FastLog2f(1+i-1);
     opt_split[i] = i-1;
-
+    
     for(int32_t j = i-1; j >= 0; j--){
       for(size_t k = 0; k < max_symbols; k++){
         residual_histogramm[k] += freq[j][k];
         tot_samples += freq[j][k];
       }
-      float new_dp = EstimateBits(residual_histogramm.data(), max_symbols) + split_cost + FastLog2f(1+j-1);
+
+      if (tot_samples > 0) curr_split_cost -= tot_samples * FastLog2f(tot_samples);
+      for (auto [r, f] : freq1[j]) {
+        if (residual_histogramm[r] > 0) curr_split_cost += residual_histogramm[r] * FastLog2f(residual_histogramm[r]);
+        curr_split_cost -= (residual_histogramm[r] + f) * FastLog2f(residual_histogramm[r] + f);
+        tot_samples += f;
+      }  // ammortized cost
+      if (tot_samples > 0) curr_split_cost += tot_samples * FastLog2f(tot_samples);
+
+      float new_dp = curr_split_cost + split_cost + FastLog2f(1+j-1);
       if(j > 0) new_dp += dp[j-1];
       if(new_dp < dp[i]){
         dp[i] = new_dp; 
