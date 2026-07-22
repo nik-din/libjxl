@@ -195,21 +195,10 @@ void FindBestCutoff(TreeSamples& tree_samples,
 
   std::vector<std::vector<std::pair<int32_t, int32_t>>> freq1(max_prop-min_prop + 1);
   for (int32_t i = 0; i < max_prop + 1; i++) {
-    for (int32_t j = 0; j < max_symbols; j++) {
-
+    for (size_t j = 0; j < max_symbols; j++) {
       if (freq[i][j]>0) freq1[i].push_back({j, freq[i][j]});
     }
   }
-  int32_t num_prop_val = 0;  // how many values there actually are
-  int lst = -1;              // last previous existing ?
-  for (size_t i = 0; i < max_prop + 1; i++) {
-    if (exist[i]) {
-      num_prop_val++;
-      exist[i] = lst;
-      lst = i;
-    } else
-      exist[i] = lst;
-  }//
 
 
   std::vector<float> dp(max_prop-min_prop+1, 0);
