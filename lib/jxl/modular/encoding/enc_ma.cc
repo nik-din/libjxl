@@ -24,6 +24,9 @@
 #include "lib/jxl/modular/encoding/ma_common.h"
 #include "lib/jxl/modular/modular_image.h"
 
+#include "lib/jxl/modular/encoding/dec_ma.h"
+#include <iostream>
+
 #undef HWY_TARGET_INCLUDE
 #define HWY_TARGET_INCLUDE "lib/jxl/modular/encoding/enc_ma.cc"
 #include <hwy/foreach_target.h>
@@ -55,7 +58,7 @@ size_t Padded(size_t x) {
 
 // Compute entropy of the histogram, taking into account the minimum probability
 // for symbols with non-zero counts.
-float EstimateBits(const int32_t *counts, size_t num_symbols) {
+float EstimateBits(const int32_t *counts, size_t num_symbols) { //
   JXL_DASSERT(num_symbols == Padded(num_symbols));
   auto total_v = Zero(di);
   for (size_t i = 0; i < num_symbols; i += Lanes(di)) {
@@ -164,10 +167,121 @@ void CollectExtraBitsIncrease(TreeSamples &tree_samples,
   }
 }
 
+void FindBestCutoff(TreeSamples &tree_samples, StaticPropRange initial_static_prop_range, Tree *tree) {
+  // std::cerr << "67\n";
+
+  size_t begin = 0;
+  size_t end = tree_samples.NumDistinctSamples();
+  size_t max_symbols = 0;
+  for (size_t i = begin; i < end; i++) {
+    uint32_t tok = tree_samples.Token(0, i);
+    max_symbols = max_symbols > tok + 1 ? max_symbols : tok + 1;
+  }
+  max_symbols = Padded(max_symbols);
+  const size_t max_prop = 255;
+
+  std::vector<std::vector<int32_t>> freq(max_prop+1, std::vector<int32_t>(max_symbols, 0));
+  std::vector<int> exist(max_prop+1, 0);
+  std::vector<int32_t> values;
+
+  for(size_t i = begin; i < end; i++){
+    int32_t prp = tree_samples.Property<false>(0, i);
+    freq[prp][tree_samples.Token(0, i)]++;
+    exist[prp] = 1;
+  }
+  
+  int32_t num_prop_val = 0;
+  int lst = -1;
+  for(size_t i = 0; i<max_prop+1; i++){
+    if(exist[i]){
+      num_prop_val++;
+      exist[i] = lst; lst = i;
+    }
+    else exist[i] = lst;
+  }
+
+  std::vector<float> dp(max_prop+1, 0);
+  std::vector<int32_t> opt_split(max_prop+1);
+
+  const float split_cost = 0.5;
+
+  for(size_t i = 0; i<max_prop+1; i++){
+    
+    std::vector<int32_t> residual_histogramm(max_symbols, 0);
+    int32_t tot_samples = 0;
+    for(size_t k = 0; k < max_symbols; k++){
+      residual_histogramm[k] += freq[i][k];
+      tot_samples += freq[i][k];
+    }
+    dp[i] = EstimateBits(residual_histogramm.data(), max_symbols) + split_cost;
+    // if(tot_samples > 0) std:: cerr << "[" << dp[i]-split_cost << ' ' << tot_samples << "] ";
+    if(i > 0) dp[i] += dp[i-1];
+    opt_split[i] = exist[i];
+
+    for(int32_t j = i-1; j >= 0; j--){
+      for(size_t k = 0; k < max_symbols; k++){
+        residual_histogramm[k] += freq[j][k];
+        tot_samples += freq[j][k];
+      }
+      float new_dp = EstimateBits(residual_histogramm.data(), max_symbols) + split_cost;
+      if(j > 0) new_dp += dp[j-1];
+      if(new_dp < dp[i]){
+        dp[i] = new_dp; 
+        opt_split[i] = exist[j];
+      }
+    }
+  }
+
+  std::vector<int32_t> cutoffs;
+  int32_t curr = opt_split[max_prop];
+  while(curr != -1){
+    cutoffs.push_back(curr);
+    curr = opt_split[curr];
+  }
+  std::sort(cutoffs.begin(), cutoffs.end());
+  
+  // std::cerr << '(' << end << ',' << num_prop_val << ',' << cutoffs.size() << ") ";
+
+  // for(int32_t i: cutoffs) std::cerr << i << ' '; 
+  // std::cerr << '\n';
+  // std::cerr << tree_samples.NumDistinctSamples() << '\n';
+
+  Predictor pred = tree_samples.PredictorFromIndex(0);
+  int32_t property = tree_samples.PropertyFromIndex(0); 
+
+  struct NodeInfo {
+    size_t begin, end, pos;
+  };
+  std::queue<NodeInfo> q;
+  // Leaf IDs will be set by roundtrip decoding the tree.
+  tree->back() = PropertyDecisionNode::Leaf(pred);
+  q.push(NodeInfo{0, cutoffs.size(), 0});
+
+
+  while (!q.empty()) {
+    NodeInfo info = q.front();
+    q.pop();
+    if (info.begin == info.end) continue;
+    uint32_t split = (info.begin + info.end) / 2;
+    int32_t cutoff = tree_samples.UnquantizeProperty(0, cutoffs[split]);
+    (*tree)[info.pos] = PropertyDecisionNode::Split(property, cutoff, tree->size());
+    q.push(NodeInfo{split + 1, info.end, tree->size()});
+    tree->push_back(PropertyDecisionNode::Leaf(pred));
+    q.push(NodeInfo{info.begin, split, tree->size()});
+    tree->push_back(PropertyDecisionNode::Leaf(pred));
+  }
+
+  return;
+}
+
 void FindBestSplit(TreeSamples &tree_samples, float threshold,
                    const std::vector<ModularMultiplierInfo> &mul_info,
                    StaticPropRange initial_static_prop_range,
                    float fast_decode_multiplier, Tree *tree) {
+  if(tree_samples.NumProperties() == 1){
+    FindBestCutoff(tree_samples, initial_static_prop_range, tree);
+    return;
+  }
   struct NodeInfo {
     size_t pos;
     size_t begin;
@@ -526,10 +640,13 @@ Status ComputeBestTree(TreeSamples &tree_samples, float threshold,
 
   JXL_ENSURE(tree_samples.NumDistinctSamples() <=
              std::numeric_limits<uint32_t>::max());
+  
+  
   HWY_DYNAMIC_DISPATCH(FindBestSplit)
   (tree_samples, threshold, mul_info, static_prop_range, fast_decode_multiplier,
-   tree);
-  return true;
+  tree);
+  
+    return true;
 }
 
 #if JXL_CXX_LANG < JXL_CXX_17
