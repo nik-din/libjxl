@@ -178,24 +178,25 @@ void FindBestCutoff(TreeSamples& tree_samples,
     max_symbols = max_symbols > tok + 1 ? max_symbols : tok + 1;
   }
   max_symbols = Padded(max_symbols);
-  const size_t max_prop = 255;
-
-  std::vector<std::vector<int32_t>> freq(max_prop + 1, std::vector<int32_t>(max_symbols,0));  
-  // for each prop, it counts for each residual how many are there
-  std::vector<int> exist(max_prop + 1, 0);  // what's the previous existing one
-  std::vector<int32_t> values;
-
-  for (size_t i = begin; i < end; i++) {
-    int32_t prp = tree_samples.Property<false>(0, i);
-    freq[prp][tree_samples.Token(0, i)]++;
-    exist[prp] = 1;
+  
+  int32_t max_prop = 0;
+  int32_t min_prop = 0;
+  for(size_t i = begin; i<end; i++){
+    max_prop = std::max(max_prop, tree_samples.UnquantProperty<false>(0, i));
+    min_prop = std::min(min_prop, tree_samples.UnquantProperty<false>(0, i));
   }
 
-  // only the ones that actually exist
-  //std::cerr << "Hiiii";
-  std::vector<std::vector<std::pair<int32_t, int32_t>>> freq1(max_prop + 1);
-  for (size_t i = 0; i < max_prop + 1; i++) {
-    for (size_t j = 0; j < max_symbols; j++) {
+  std::vector<std::vector<int32_t>> freq(max_prop-min_prop+1, std::vector<int32_t>(max_symbols, 0));
+
+  for(size_t i = begin; i < end; i++){
+    int32_t prp = tree_samples.UnquantProperty<false>(0, i);
+    freq[prp-min_prop][tree_samples.Token(0, i)]++;
+  }
+
+  std::vector<std::vector<std::pair<int32_t, int32_t>>> freq1(max_prop-min_prop + 1);
+  for (int32_t i = 0; i < max_prop + 1; i++) {
+    for (int32_t j = 0; j < max_symbols; j++) {
+
       if (freq[i][j]>0) freq1[i].push_back({j, freq[i][j]});
     }
   }
@@ -210,67 +211,57 @@ void FindBestCutoff(TreeSamples& tree_samples,
       exist[i] = lst;
   }//
 
-  std::vector<float> dp(max_prop + 1, 0);
-  std::vector<int32_t> opt_split(max_prop + 1);
 
-  const float split_cost = 42;  // magic constant
+  std::vector<float> dp(max_prop-min_prop+1, 0);
+  std::vector<int32_t> opt_split(max_prop-min_prop+1);
 
-  for (size_t i = 0; i < max_prop + 1; i++) {
+  const int32_t split_cost = 1;
+
+  for(int32_t i = 0; i<max_prop-min_prop+1; i++){
+    
     std::vector<int32_t> residual_histogramm(max_symbols, 0);
     int32_t tot_samples = 0;
     for (size_t k = 0; k < max_symbols; k++) {
       residual_histogramm[k] += freq[i][k];
       tot_samples += freq[i][k];
     }
-    dp[i] = EstimateBits(residual_histogramm.data(), max_symbols) + split_cost;
-    // if(tot_samples > 0) std:: cerr << "[" << dp[i]-split_cost << ' ' <<
-    // tot_samples << "] ";
-    if (i > 0) dp[i] += dp[i - 1];
-    opt_split[i] = exist[i];
 
-    float curr_split_cost = 0;
-    std::vector<int32_t> curr_freq(max_symbols, 0);
-    int32_t T = 0;  // the actual T...
-    for (int32_t j = i - 1; j >= 0; j--) {
-      /*for(size_t k = 0; k < max_symbols; k++){
+    float curr_split_cost = EstimateBits(residual_histogramm.data(), max_symbols);
+
+    dp[i] = curr_split_cost + split_cost;
+    if(i > 0) dp[i] += dp[i-1] + FastLog2f(1+i-1);
+    opt_split[i] = i-1;
+    
+    for(int32_t j = i-1; j >= 0; j--){
+      for(size_t k = 0; k < max_symbols; k++){
         residual_histogramm[k] += freq[j][k];
         tot_samples += freq[j][k];
-      }*/
-      if (T > 0) curr_split_cost -= T * FastLog2f(T);
+      }
+
+      if (tot_samples > 0) curr_split_cost -= tot_samples * FastLog2f(tot_samples);
       for (auto [r, f] : freq1[j]) {
-        if (curr_freq[r] > 0) curr_split_cost += curr_freq[r] * FastLog2f(curr_freq[r]);
-        curr_split_cost -= (curr_freq[r] + f) * FastLog2f(curr_freq[r] + f);
-        T += f;
-        curr_freq[r] += f;
+        if (residual_histogramm[r] > 0) curr_split_cost += residual_histogramm[r] * FastLog2f(residual_histogramm[r]);
+        curr_split_cost -= (residual_histogramm[r] + f) * FastLog2f(residual_histogramm[r] + f);
+        tot_samples += f;
       }  // ammortized cost
-      if (T > 0) curr_split_cost += T * FastLog2f(T);
-      //if(EstimateBits(curr_freq.data(), max_symbols) != curr_split_cost) std::cerr<<"Hiiii";
-      /*float new_dp = EstimateBits(residual_histogramm.data(), max_symbols) + split_cost; 
-      if(j > 0) new_dp += dp[j-1]; if(new_dp < dp[i]){ dp[i] =
-      new_dp; opt_split[i] = exist[j];
-      }*/
-      float new_cost = curr_split_cost + split_cost;
-      if (j > 0) new_cost += dp[j - 1];
-      if (new_cost < dp[i]) {
-        dp[i] = new_cost;
-        opt_split[i] = exist[j];
+      if (tot_samples > 0) curr_split_cost += tot_samples * FastLog2f(tot_samples);
+
+      float new_dp = curr_split_cost + split_cost + FastLog2f(1+j-1);
+      if(j > 0) new_dp += dp[j-1];
+      if(new_dp < dp[i]){
+        dp[i] = new_dp; 
+        opt_split[i] = j-1;
       }
     }
   }
 
   std::vector<int32_t> cutoffs;
-  int32_t curr = opt_split[max_prop];
-  while (curr != -1) {
+  int32_t curr = opt_split[max_prop-min_prop];
+  while(curr != -1){
     cutoffs.push_back(curr);
     curr = opt_split[curr];
   }
   std::sort(cutoffs.begin(), cutoffs.end());
-
-  std::cerr << '(' << end << ',' << num_prop_val << ',' << cutoffs.size() << ") ";
-
-  for(int32_t i: cutoffs) std::cerr << i << ' ';
-  std::cerr << '\n';
-  // std::cerr << tree_samples.NumDistinctSamples() << '\n';
 
   Predictor pred = tree_samples.PredictorFromIndex(0);
   int32_t property = tree_samples.PropertyFromIndex(0);
@@ -288,9 +279,8 @@ void FindBestCutoff(TreeSamples& tree_samples,
     q.pop();
     if (info.begin == info.end) continue;
     uint32_t split = (info.begin + info.end) / 2;
-    int32_t cutoff = tree_samples.UnquantizeProperty(0, cutoffs[split]);
-    (*tree)[info.pos] =
-        PropertyDecisionNode::Split(property, cutoff, tree->size());
+    int32_t cutoff = cutoffs[split];
+    (*tree)[info.pos] = PropertyDecisionNode::Split(property, cutoff, tree->size());
     q.push(NodeInfo{split + 1, info.end, tree->size()});
     tree->push_back(PropertyDecisionNode::Leaf(pred));
     q.push(NodeInfo{info.begin, split, tree->size()});
@@ -737,6 +727,7 @@ Status TreeSamples::SetProperties(const std::vector<uint32_t>& properties,
     }
   }
   props.resize(props_to_use.size() - num_static_props);
+  unquant_props.resize(props_to_use.size() - num_static_props);
   return true;
 }
 
@@ -796,8 +787,12 @@ void TreeSamples::PrepareForSamples(size_t extra_num_samples) {
   }
   for (size_t i = 0; i < num_static_props; ++i) {
     static_props[i].reserve(static_props[i].size() + extra_num_samples);
+    unquant_static_props[i].reserve(unquant_static_props[i].size() + extra_num_samples);
   }
   for (auto& p : props) {
+    p.reserve(p.size() + extra_num_samples);
+  }
+  for (auto &p : unquant_props) {
     p.reserve(p.size() + extra_num_samples);
   }
   size_t total_num_samples = extra_num_samples + sample_counts.size();
@@ -873,17 +868,22 @@ void TreeSamples::AddSample(pixel_type_w pixel, const Properties& properties,
   }
   for (size_t i = 0; i < num_static_props; ++i) {
     static_props[i].push_back(QuantizeStaticProperty(i, properties[i]));
+    unquant_static_props[i].push_back(properties[i]);
   }
   for (size_t i = num_static_props; i < props_to_use.size(); i++) {
-    props[i - num_static_props].push_back(
-        QuantizeProperty(i, properties[props_to_use[i]]));
+    props[i - num_static_props].push_back(QuantizeProperty(i, properties[props_to_use[i]]));
+    unquant_props[i - num_static_props].push_back(properties[props_to_use[i]]);
   }
+
   sample_counts.push_back(1);
   num_samples++;
   if (AddToTableAndMerge(sample_counts.size() - 1)) {
-    for (auto& r : residuals) r.pop_back();
-    for (size_t i = 0; i < num_static_props; ++i) static_props[i].pop_back();
-    for (auto& p : props) p.pop_back();
+    for (auto &r : residuals) r.pop_back();
+    for (size_t i = 0; i < num_static_props; ++i){
+      static_props[i].pop_back();
+      unquant_static_props[i].pop_back();
+    }
+    for (auto &p : props) p.pop_back();
     sample_counts.pop_back();
   }
 }
@@ -895,8 +895,12 @@ void TreeSamples::Swap(size_t a, size_t b) {
   }
   for (size_t i = 0; i < num_static_props; ++i) {
     std::swap(static_props[i][a], static_props[i][b]);
+    std::swap(unquant_static_props[i][a], unquant_static_props[i][b]);
   }
   for (auto& p : props) {
+    std::swap(p[a], p[b]);
+  }
+  for (auto &p : unquant_props) {
     std::swap(p[a], p[b]);
   }
   std::swap(sample_counts[a], sample_counts[b]);
