@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <limits>
 #include <numeric>
 #include <queue>
@@ -23,9 +24,7 @@
 #include "lib/jxl/modular/encoding/dec_ma.h"
 #include "lib/jxl/modular/encoding/ma_common.h"
 #include "lib/jxl/modular/modular_image.h"
-
 #include "lib/jxl/modular/encoding/dec_ma.h"
-#include <iostream>
 
 #undef HWY_TARGET_INCLUDE
 #define HWY_TARGET_INCLUDE "lib/jxl/modular/encoding/enc_ma.cc"
@@ -58,7 +57,7 @@ size_t Padded(size_t x) {
 
 // Compute entropy of the histogram, taking into account the minimum probability
 // for symbols with non-zero counts.
-float EstimateBits(const int32_t *counts, size_t num_symbols) { //
+float EstimateBits(const int32_t* counts, size_t num_symbols) {  //
   JXL_DASSERT(num_symbols == Padded(num_symbols));
   auto total_v = Zero(di);
   for (size_t i = 0; i < num_symbols; i += Lanes(di)) {
@@ -83,7 +82,7 @@ float EstimateBits(const int32_t *counts, size_t num_symbols) { //
 }
 
 void MakeSplitNode(size_t pos, int property, int splitval, Predictor lpred,
-                   int64_t loff, Predictor rpred, int64_t roff, Tree *tree) {
+                   int64_t loff, Predictor rpred, int64_t roff, Tree* tree) {
   // Note that the tree splits on *strictly greater*.
   (*tree)[pos].lchild = tree->size();
   (*tree)[pos].rchild = tree->size() + 1;
@@ -103,7 +102,7 @@ void MakeSplitNode(size_t pos, int property, int splitval, Predictor lpred,
 
 enum class IntersectionType { kNone, kPartial, kInside };
 IntersectionType BoxIntersects(StaticPropRange needle, StaticPropRange haystack,
-                               uint32_t &partial_axis, uint32_t &partial_val) {
+                               uint32_t& partial_axis, uint32_t& partial_val) {
   bool partial = false;
   for (size_t i = 0; i < kNumStaticProperties; i++) {
     if (haystack[i][0] >= needle[i][1]) {
@@ -128,8 +127,8 @@ IntersectionType BoxIntersects(StaticPropRange needle, StaticPropRange haystack,
   return partial ? IntersectionType::kPartial : IntersectionType::kInside;
 }
 
-template<bool S>
-void SplitTreeSamples(TreeSamples &tree_samples, size_t begin, size_t pos,
+template <bool S>
+void SplitTreeSamples(TreeSamples& tree_samples, size_t begin, size_t pos,
                       size_t end, size_t prop, uint32_t val) {
   size_t begin_pos = begin;
   size_t end_pos = pos;
@@ -150,14 +149,14 @@ void SplitTreeSamples(TreeSamples &tree_samples, size_t begin, size_t pos,
 }
 
 template <bool S>
-void CollectExtraBitsIncrease(TreeSamples &tree_samples,
-                              const std::vector<ResidualToken> &rtokens,
-                              std::vector<int> &count_increase,
-                              std::vector<size_t> &extra_bits_increase,
+void CollectExtraBitsIncrease(TreeSamples& tree_samples,
+                              const std::vector<ResidualToken>& rtokens,
+                              std::vector<int>& count_increase,
+                              std::vector<size_t>& extra_bits_increase,
                               size_t begin, size_t end, size_t prop_idx,
                               size_t max_symbols) {
   for (size_t i2 = begin; i2 < end; i2++) {
-    const ResidualToken &rt = rtokens[i2];
+    const ResidualToken& rt = rtokens[i2];
     size_t cnt = tree_samples.Count(i2);
     size_t p = tree_samples.Property<S>(prop_idx, i2);
     size_t sym = rt.tok;
@@ -167,7 +166,8 @@ void CollectExtraBitsIncrease(TreeSamples &tree_samples,
   }
 }
 
-void FindBestCutoff(TreeSamples &tree_samples, StaticPropRange initial_static_prop_range, Tree *tree) {
+void FindBestCutoff(TreeSamples& tree_samples,
+                    StaticPropRange initial_static_prop_range, Tree* tree) {
   // std::cerr << "67\n";
 
   size_t begin = 0;
@@ -180,53 +180,79 @@ void FindBestCutoff(TreeSamples &tree_samples, StaticPropRange initial_static_pr
   max_symbols = Padded(max_symbols);
   const size_t max_prop = 255;
 
-  std::vector<std::vector<int32_t>> freq(max_prop+1, std::vector<int32_t>(max_symbols, 0));
-  std::vector<int> exist(max_prop+1, 0);
+  std::vector<std::vector<int32_t>> freq(max_prop + 1, std::vector<int32_t>(max_symbols,0));  
+  // for each prop, it counts for each residual how many are there
+  std::vector<int> exist(max_prop + 1, 0);  // what's the previous existing one
   std::vector<int32_t> values;
 
-  for(size_t i = begin; i < end; i++){
+  for (size_t i = begin; i < end; i++) {
     int32_t prp = tree_samples.Property<false>(0, i);
     freq[prp][tree_samples.Token(0, i)]++;
     exist[prp] = 1;
   }
-  
-  int32_t num_prop_val = 0;
-  int lst = -1;
-  for(size_t i = 0; i<max_prop+1; i++){
-    if(exist[i]){
-      num_prop_val++;
-      exist[i] = lst; lst = i;
+
+  // only the ones that actually exist
+  //std::cerr << "Hiiii";
+  std::vector<std::vector<std::pair<int32_t, int32_t>>> freq1(max_prop + 1);
+  for (size_t i = 0; i < max_prop + 1; i++) {
+    for (size_t j = 0; j < max_symbols; j++) {
+      if (freq[i][j]>0) freq1[i].push_back({j, freq[i][j]});
     }
-    else exist[i] = lst;
   }
+  int32_t num_prop_val = 0;  // how many values there actually are
+  int lst = -1;              // last previous existing ?
+  for (size_t i = 0; i < max_prop + 1; i++) {
+    if (exist[i]) {
+      num_prop_val++;
+      exist[i] = lst;
+      lst = i;
+    } else
+      exist[i] = lst;
+  }//
 
-  std::vector<float> dp(max_prop+1, 0);
-  std::vector<int32_t> opt_split(max_prop+1);
+  std::vector<float> dp(max_prop + 1, 0);
+  std::vector<int32_t> opt_split(max_prop + 1);
 
-  const float split_cost = 0.5;
+  const float split_cost = 42;  // magic constant
 
-  for(size_t i = 0; i<max_prop+1; i++){
-    
+  for (size_t i = 0; i < max_prop + 1; i++) {
     std::vector<int32_t> residual_histogramm(max_symbols, 0);
     int32_t tot_samples = 0;
-    for(size_t k = 0; k < max_symbols; k++){
+    for (size_t k = 0; k < max_symbols; k++) {
       residual_histogramm[k] += freq[i][k];
       tot_samples += freq[i][k];
     }
     dp[i] = EstimateBits(residual_histogramm.data(), max_symbols) + split_cost;
-    // if(tot_samples > 0) std:: cerr << "[" << dp[i]-split_cost << ' ' << tot_samples << "] ";
-    if(i > 0) dp[i] += dp[i-1];
+    // if(tot_samples > 0) std:: cerr << "[" << dp[i]-split_cost << ' ' <<
+    // tot_samples << "] ";
+    if (i > 0) dp[i] += dp[i - 1];
     opt_split[i] = exist[i];
 
-    for(int32_t j = i-1; j >= 0; j--){
-      for(size_t k = 0; k < max_symbols; k++){
+    float curr_split_cost = 0;
+    std::vector<int32_t> curr_freq(max_symbols, 0);
+    int32_t T = 0;  // the actual T...
+    for (int32_t j = i - 1; j >= 0; j--) {
+      /*for(size_t k = 0; k < max_symbols; k++){
         residual_histogramm[k] += freq[j][k];
         tot_samples += freq[j][k];
-      }
-      float new_dp = EstimateBits(residual_histogramm.data(), max_symbols) + split_cost;
-      if(j > 0) new_dp += dp[j-1];
-      if(new_dp < dp[i]){
-        dp[i] = new_dp; 
+      }*/
+      if (T > 0) curr_split_cost -= T * FastLog2f(T);
+      for (auto [r, f] : freq1[j]) {
+        if (curr_freq[r] > 0) curr_split_cost += curr_freq[r] * FastLog2f(curr_freq[r]);
+        curr_split_cost -= (curr_freq[r] + f) * FastLog2f(curr_freq[r] + f);
+        T += f;
+        curr_freq[r] += f;
+      }  // ammortized cost
+      if (T > 0) curr_split_cost += T * FastLog2f(T);
+      //if(EstimateBits(curr_freq.data(), max_symbols) != curr_split_cost) std::cerr<<"Hiiii";
+      /*float new_dp = EstimateBits(residual_histogramm.data(), max_symbols) + split_cost; 
+      if(j > 0) new_dp += dp[j-1]; if(new_dp < dp[i]){ dp[i] =
+      new_dp; opt_split[i] = exist[j];
+      }*/
+      float new_cost = curr_split_cost + split_cost;
+      if (j > 0) new_cost += dp[j - 1];
+      if (new_cost < dp[i]) {
+        dp[i] = new_cost;
         opt_split[i] = exist[j];
       }
     }
@@ -234,20 +260,20 @@ void FindBestCutoff(TreeSamples &tree_samples, StaticPropRange initial_static_pr
 
   std::vector<int32_t> cutoffs;
   int32_t curr = opt_split[max_prop];
-  while(curr != -1){
+  while (curr != -1) {
     cutoffs.push_back(curr);
     curr = opt_split[curr];
   }
   std::sort(cutoffs.begin(), cutoffs.end());
-  
-  // std::cerr << '(' << end << ',' << num_prop_val << ',' << cutoffs.size() << ") ";
 
-  // for(int32_t i: cutoffs) std::cerr << i << ' '; 
-  // std::cerr << '\n';
+  std::cerr << '(' << end << ',' << num_prop_val << ',' << cutoffs.size() << ") ";
+
+  for(int32_t i: cutoffs) std::cerr << i << ' ';
+  std::cerr << '\n';
   // std::cerr << tree_samples.NumDistinctSamples() << '\n';
 
   Predictor pred = tree_samples.PredictorFromIndex(0);
-  int32_t property = tree_samples.PropertyFromIndex(0); 
+  int32_t property = tree_samples.PropertyFromIndex(0);
 
   struct NodeInfo {
     size_t begin, end, pos;
@@ -257,14 +283,14 @@ void FindBestCutoff(TreeSamples &tree_samples, StaticPropRange initial_static_pr
   tree->back() = PropertyDecisionNode::Leaf(pred);
   q.push(NodeInfo{0, cutoffs.size(), 0});
 
-
   while (!q.empty()) {
     NodeInfo info = q.front();
     q.pop();
     if (info.begin == info.end) continue;
     uint32_t split = (info.begin + info.end) / 2;
     int32_t cutoff = tree_samples.UnquantizeProperty(0, cutoffs[split]);
-    (*tree)[info.pos] = PropertyDecisionNode::Split(property, cutoff, tree->size());
+    (*tree)[info.pos] =
+        PropertyDecisionNode::Split(property, cutoff, tree->size());
     q.push(NodeInfo{split + 1, info.end, tree->size()});
     tree->push_back(PropertyDecisionNode::Leaf(pred));
     q.push(NodeInfo{info.begin, split, tree->size()});
@@ -274,11 +300,11 @@ void FindBestCutoff(TreeSamples &tree_samples, StaticPropRange initial_static_pr
   return;
 }
 
-void FindBestSplit(TreeSamples &tree_samples, float threshold,
-                   const std::vector<ModularMultiplierInfo> &mul_info,
+void FindBestSplit(TreeSamples& tree_samples, float threshold,
+                   const std::vector<ModularMultiplierInfo>& mul_info,
                    StaticPropRange initial_static_prop_range,
-                   float fast_decode_multiplier, Tree *tree) {
-  if(tree_samples.NumProperties() == 1){
+                   float fast_decode_multiplier, Tree* tree) {
+  if (tree_samples.NumProperties() == 1) {
     FindBestCutoff(tree_samples, initial_static_prop_range, tree);
     return;
   }
@@ -357,13 +383,13 @@ void FindBestSplit(TreeSamples &tree_samples, float threshold,
           tot_extra_bits[pred];
     }
 
-    SplitInfo *best = &best_split_nonstatic;
+    SplitInfo* best = &best_split_nonstatic;
 
     SplitInfo forced_split;
     // The multiplier ranges cut halfway through the current ranges of static
     // properties. We do this even if the current node is not a leaf, to
     // minimize the number of nodes in the resulting tree.
-    for (const auto &mmi : mul_info) {
+    for (const auto& mmi : mul_info) {
       uint32_t axis;
       uint32_t val;
       IntersectionType t =
@@ -383,19 +409,19 @@ void FindBestSplit(TreeSamples &tree_samples, float threshold,
         best->pos = begin;
         JXL_DASSERT(best->prop == tree_samples.PropertyFromIndex(best->prop));
         if (best->prop < tree_samples.NumStaticProps()) {
-        for (size_t x = begin; x < end; x++) {
-          if (tree_samples.Property<true>(best->prop, x) <= best->val) {
-            best->pos++;
+          for (size_t x = begin; x < end; x++) {
+            if (tree_samples.Property<true>(best->prop, x) <= best->val) {
+              best->pos++;
+            }
+          }
+        } else {
+          size_t prop = best->prop - tree_samples.NumStaticProps();
+          for (size_t x = begin; x < end; x++) {
+            if (tree_samples.Property<false>(prop, x) <= best->val) {
+              best->pos++;
+            }
           }
         }
-      } else {
-        size_t prop = best->prop - tree_samples.NumStaticProps();
-        for (size_t x = begin; x < end; x++) {
-          if (tree_samples.Property<false>(prop, x) <= best->val) {
-            best->pos++;
-          }
-        }
-      }
         break;
       }
     }
@@ -462,7 +488,7 @@ void FindBestSplit(TreeSamples &tree_samples, float threshold,
         // For all predictors, compute the right and left costs of each split.
         for (size_t pred = 0; pred < num_predictors; pred++) {
           // Compute cost and histogram increments for each property value.
-          const std::vector<ResidualToken> &rtokens =
+          const std::vector<ResidualToken>& rtokens =
               tree_samples.RTokens(pred);
           if (prop < tree_samples.NumStaticProps()) {
             CollectExtraBitsIncrease<true>(tree_samples, rtokens,
@@ -539,7 +565,7 @@ void FindBestSplit(TreeSamples &tree_samples, float threshold,
                          costs_r[i - first_used].pred == Predictor::Weighted;
           bool zero_entropy_side = rcost == 0 || lcost == 0;
 
-          SplitInfo &best_ref =
+          SplitInfo& best_ref =
               tree_samples.PropertyFromIndex(prop) < kNumStaticProperties
                   ? (zero_entropy_side ? best_split_static_constant
                                        : best_split_static)
@@ -623,10 +649,10 @@ namespace jxl {
 
 HWY_EXPORT(FindBestSplit);  // Local function.
 
-Status ComputeBestTree(TreeSamples &tree_samples, float threshold,
-                       const std::vector<ModularMultiplierInfo> &mul_info,
+Status ComputeBestTree(TreeSamples& tree_samples, float threshold,
+                       const std::vector<ModularMultiplierInfo>& mul_info,
                        StaticPropRange static_prop_range,
-                       float fast_decode_multiplier, Tree *tree) {
+                       float fast_decode_multiplier, Tree* tree) {
   // TODO(veluca): take into account that different contexts can have different
   // uint configs.
   //
@@ -640,13 +666,12 @@ Status ComputeBestTree(TreeSamples &tree_samples, float threshold,
 
   JXL_ENSURE(tree_samples.NumDistinctSamples() <=
              std::numeric_limits<uint32_t>::max());
-  
-  
+
   HWY_DYNAMIC_DISPATCH(FindBestSplit)
   (tree_samples, threshold, mul_info, static_prop_range, fast_decode_multiplier,
-  tree);
-  
-    return true;
+   tree);
+
+  return true;
 }
 
 #if JXL_CXX_LANG < JXL_CXX_17
@@ -685,7 +710,7 @@ Status TreeSamples::SetPredictor(Predictor predictor,
   return true;
 }
 
-Status TreeSamples::SetProperties(const std::vector<uint32_t> &properties,
+Status TreeSamples::SetProperties(const std::vector<uint32_t>& properties,
                                   ModularOptions::TreeMode wp_tree_mode) {
   props_to_use = properties;
   if (wp_tree_mode == ModularOptions::TreeMode::kWPOnly) {
@@ -715,8 +740,8 @@ Status TreeSamples::SetProperties(const std::vector<uint32_t> &properties,
   return true;
 }
 
-void TreeSamples::InitTable(size_t log_size) {
-  size_t size = 1ULL << log_size;
+void TreeSamples::InitTable(size_t FastLog2f_size) {
+  size_t size = 1ULL << FastLog2f_size;
   if (dedup_table_.size() == size) return;
   dedup_table_.resize(size, kDedupEntryUnused);
   for (size_t i = 0; i < NumDistinctSamples(); i++) {
@@ -766,13 +791,13 @@ void TreeSamples::AddToTable(size_t a) {
 }
 
 void TreeSamples::PrepareForSamples(size_t extra_num_samples) {
-  for (auto &res : residuals) {
+  for (auto& res : residuals) {
     res.reserve(res.size() + extra_num_samples);
   }
   for (size_t i = 0; i < num_static_props; ++i) {
     static_props[i].reserve(static_props[i].size() + extra_num_samples);
   }
-  for (auto &p : props) {
+  for (auto& p : props) {
     p.reserve(p.size() + extra_num_samples);
   }
   size_t total_num_samples = extra_num_samples + sample_counts.size();
@@ -783,14 +808,14 @@ void TreeSamples::PrepareForSamples(size_t extra_num_samples) {
 size_t TreeSamples::Hash1(size_t a) const {
   constexpr uint64_t constant = 0x1e35a7bd;
   uint64_t h = constant;
-  for (const auto &r : residuals) {
+  for (const auto& r : residuals) {
     h = h * constant + r[a].tok;
     h = h * constant + r[a].nbits;
   }
   for (size_t i = 0; i < num_static_props; ++i) {
     h = h * constant + static_props[i][a];
   }
-  for (const auto &p : props) {
+  for (const auto& p : props) {
     h = h * constant + p[a];
   }
   return (h >> 16) & (dedup_table_.size() - 1);
@@ -801,10 +826,10 @@ size_t TreeSamples::Hash2(size_t a) const {
   for (size_t i = 0; i < num_static_props; ++i) {
     h = h * constant ^ static_props[i][a];
   }
-  for (const auto &p : props) {
+  for (const auto& p : props) {
     h = h * constant ^ p[a];
   }
-  for (const auto &r : residuals) {
+  for (const auto& r : residuals) {
     h = h * constant ^ r[a].tok;
     h = h * constant ^ r[a].nbits;
   }
@@ -813,7 +838,7 @@ size_t TreeSamples::Hash2(size_t a) const {
 
 bool TreeSamples::IsSameSample(size_t a, size_t b) const {
   bool ret = true;
-  for (const auto &r : residuals) {
+  for (const auto& r : residuals) {
     if (r[a].tok != r[b].tok) {
       ret = false;
     }
@@ -826,7 +851,7 @@ bool TreeSamples::IsSameSample(size_t a, size_t b) const {
       ret = false;
     }
   }
-  for (const auto &p : props) {
+  for (const auto& p : props) {
     if (p[a] != p[b]) {
       ret = false;
     }
@@ -834,8 +859,8 @@ bool TreeSamples::IsSameSample(size_t a, size_t b) const {
   return ret;
 }
 
-void TreeSamples::AddSample(pixel_type_w pixel, const Properties &properties,
-                            const pixel_type_w *predictions) {
+void TreeSamples::AddSample(pixel_type_w pixel, const Properties& properties,
+                            const pixel_type_w* predictions) {
   for (size_t i = 0; i < predictors.size(); i++) {
     pixel_type v = pixel - predictions[static_cast<int>(predictors[i])];
     uint32_t tok, nbits, bits;
@@ -850,34 +875,35 @@ void TreeSamples::AddSample(pixel_type_w pixel, const Properties &properties,
     static_props[i].push_back(QuantizeStaticProperty(i, properties[i]));
   }
   for (size_t i = num_static_props; i < props_to_use.size(); i++) {
-    props[i - num_static_props].push_back(QuantizeProperty(i, properties[props_to_use[i]]));
+    props[i - num_static_props].push_back(
+        QuantizeProperty(i, properties[props_to_use[i]]));
   }
   sample_counts.push_back(1);
   num_samples++;
   if (AddToTableAndMerge(sample_counts.size() - 1)) {
-    for (auto &r : residuals) r.pop_back();
+    for (auto& r : residuals) r.pop_back();
     for (size_t i = 0; i < num_static_props; ++i) static_props[i].pop_back();
-    for (auto &p : props) p.pop_back();
+    for (auto& p : props) p.pop_back();
     sample_counts.pop_back();
   }
 }
 
 void TreeSamples::Swap(size_t a, size_t b) {
   if (a == b) return;
-  for (auto &r : residuals) {
+  for (auto& r : residuals) {
     std::swap(r[a], r[b]);
   }
   for (size_t i = 0; i < num_static_props; ++i) {
     std::swap(static_props[i][a], static_props[i][b]);
   }
-  for (auto &p : props) {
+  for (auto& p : props) {
     std::swap(p[a], p[b]);
   }
   std::swap(sample_counts[a], sample_counts[b]);
 }
 
 namespace {
-std::vector<int32_t> QuantizeHistogram(const std::vector<uint32_t> &histogram,
+std::vector<int32_t> QuantizeHistogram(const std::vector<uint32_t>& histogram,
                                        size_t num_chunks) {
   if (histogram.empty() || num_chunks == 0) return {};
   uint64_t sum = std::accumulate(histogram.begin(), histogram.end(), 0LU);
@@ -900,7 +926,7 @@ std::vector<int32_t> QuantizeHistogram(const std::vector<uint32_t> &histogram,
   return thresholds;
 }
 
-std::vector<int32_t> QuantizeSamples(const std::vector<int32_t> &samples,
+std::vector<int32_t> QuantizeSamples(const std::vector<int32_t>& samples,
                                      size_t num_chunks) {
   if (samples.empty()) return {};
   int min = *std::min_element(samples.begin(), samples.end());
@@ -912,7 +938,7 @@ std::vector<int32_t> QuantizeSamples(const std::vector<int32_t> &samples,
     counts[sample_offset]++;
   }
   std::vector<int32_t> thresholds = QuantizeHistogram(counts, num_chunks);
-  for (auto &v : thresholds) v += min;
+  for (auto& v : thresholds) v += min;
   return thresholds;
 }
 
@@ -921,7 +947,7 @@ std::vector<int32_t> QuantizeSamples(const std::vector<int32_t> &samples,
 // hence everything that is not > of a threshold should be clustered
 // together.
 template <typename T>
-void QuantMap(const std::vector<int32_t> &from, std::vector<T> &to,
+void QuantMap(const std::vector<int32_t>& from, std::vector<T>& to,
               size_t num_pegs, int bias) {
   to.resize(num_pegs);
   size_t mapped = 0;
@@ -936,17 +962,17 @@ void QuantMap(const std::vector<int32_t> &from, std::vector<T> &to,
 }  // namespace
 
 void TreeSamples::PreQuantizeProperties(
-    const StaticPropRange &range,
-    const std::vector<ModularMultiplierInfo> &multiplier_info,
-    const std::vector<uint32_t> &group_pixel_count,
-    const std::vector<uint32_t> &channel_pixel_count,
-    std::vector<pixel_type> &pixel_samples,
-    std::vector<pixel_type> &diff_samples, size_t max_property_values) {
+    const StaticPropRange& range,
+    const std::vector<ModularMultiplierInfo>& multiplier_info,
+    const std::vector<uint32_t>& group_pixel_count,
+    const std::vector<uint32_t>& channel_pixel_count,
+    std::vector<pixel_type>& pixel_samples,
+    std::vector<pixel_type>& diff_samples, size_t max_property_values) {
   // If we have forced splits because of multipliers, choose channel and group
   // thresholds accordingly.
   std::vector<int32_t> group_multiplier_thresholds;
   std::vector<int32_t> channel_multiplier_thresholds;
-  for (const auto &v : multiplier_info) {
+  for (const auto& v : multiplier_info) {
     if (v.range[0][0] != range[0][0]) {
       channel_multiplier_thresholds.push_back(v.range[0][0] - 1);
     }
@@ -1005,7 +1031,7 @@ void TreeSamples::PreQuantizeProperties(
   auto quantize_abs_pixel_property = [&]() {
     if (abs_pixel_thresholds.empty()) {
       quantize_pixel_property();  // Compute the non-abs thresholds.
-      for (auto &v : pixel_samples) v = std::abs(v);
+      for (auto& v : pixel_samples) v = std::abs(v);
       abs_pixel_thresholds =
           QuantizeSamples(pixel_samples, max_property_values);
     }
@@ -1022,7 +1048,7 @@ void TreeSamples::PreQuantizeProperties(
   auto quantize_abs_diff_property = [&]() {
     if (abs_diff_thresholds.empty()) {
       quantize_diff_property();  // Compute the non-abs thresholds.
-      for (auto &v : diff_samples) v = std::abs(v);
+      for (auto& v : diff_samples) v = std::abs(v);
       abs_diff_thresholds = QuantizeSamples(diff_samples, max_property_values);
     }
     return abs_diff_thresholds;
@@ -1081,12 +1107,12 @@ void TreeSamples::PreQuantizeProperties(
   }
 }
 
-void CollectPixelSamples(const Image &image, const ModularOptions &options,
+void CollectPixelSamples(const Image& image, const ModularOptions& options,
                          uint32_t group_id,
-                         std::vector<uint32_t> &group_pixel_count,
-                         std::vector<uint32_t> &channel_pixel_count,
-                         std::vector<pixel_type> &pixel_samples,
-                         std::vector<pixel_type> &diff_samples) {
+                         std::vector<uint32_t>& group_pixel_count,
+                         std::vector<uint32_t>& channel_pixel_count,
+                         std::vector<pixel_type>& pixel_samples,
+                         std::vector<pixel_type>& diff_samples) {
   if (options.nb_repeats == 0) return;
   if (group_pixel_count.size() <= group_id) {
     group_pixel_count.resize(group_id + 1);
@@ -1138,7 +1164,7 @@ void CollectPixelSamples(const Image &image, const ModularOptions &options,
   };
   advance(rng.Geometric(dist));
   for (; i < channel_ids.size(); advance(rng.Geometric(dist) + 1)) {
-    const pixel_type *row = image.channel[channel_ids[i]].Row(y);
+    const pixel_type* row = image.channel[channel_ids[i]].Row(y);
     pixel_samples.push_back(row[x]);
     size_t xp = x == 0 ? 1 : x - 1;
     diff_samples.push_back(static_cast<int64_t>(row[x]) - row[xp]);
@@ -1146,8 +1172,8 @@ void CollectPixelSamples(const Image &image, const ModularOptions &options,
 }
 
 // TODO(veluca): very simple encoding scheme. This should be improved.
-Status TokenizeTree(const Tree &tree, std::vector<Token> *tokens,
-                    Tree *decoder_tree) {
+Status TokenizeTree(const Tree& tree, std::vector<Token>* tokens,
+                    Tree* decoder_tree) {
   JXL_ENSURE(tree.size() <= kMaxTreeSize);
   std::queue<int> q;
   q.push(0);
@@ -1163,9 +1189,10 @@ Status TokenizeTree(const Tree &tree, std::vector<Token> *tokens,
                            static_cast<int>(tree[cur].predictor));
       tokens->emplace_back(kOffsetContext,
                            PackSigned(tree[cur].predictor_offset));
-      uint32_t mul_log = Num0BitsBelowLS1Bit_Nonzero(tree[cur].multiplier);
-      uint32_t mul_bits = (tree[cur].multiplier >> mul_log) - 1;
-      tokens->emplace_back(kMultiplierLogContext, mul_log);
+      uint32_t mul_FastLog2f =
+          Num0BitsBelowLS1Bit_Nonzero(tree[cur].multiplier);
+      uint32_t mul_bits = (tree[cur].multiplier >> mul_FastLog2f) - 1;
+      tokens->emplace_back(kMultiplierLogContext, mul_FastLog2f);
       tokens->emplace_back(kMultiplierBitsContext, mul_bits);
       JXL_ENSURE(tree[cur].predictor < Predictor::Best);
       decoder_tree->emplace_back(
