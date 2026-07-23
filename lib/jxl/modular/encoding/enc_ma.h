@@ -128,6 +128,32 @@ struct TreeSamples {
     return static_property_mapping[prop][v];
   }
 
+  int32_t SemiQuantizeProperty(pixel_type v) const {
+    // if(v >= -4 && v <= 4) 
+    return v;
+    const std::vector<int32_t> vec = {4, 16, 64, 256, 1024, 4096, 16384};
+    const std::vector<int32_t> vec2 = {4, 10, 22, 46, 94, 190, 192};
+    bool sgn = (v < 0);
+    v = std::abs(v);
+    if(v > 32768) v = 32768;
+    size_t pow2 = std::upper_bound(vec.begin(), vec.end(), v)-vec.begin();
+    v = ((v-vec[pow2-1])>>pow2)+vec2[pow2-1];
+    return v * (sgn ? -1 : 1);
+  }
+
+  int32_t UnSemiQuantizeProperty(pixel_type v) const {
+    // if(v >= -4 && v <= 4) 
+    return v;
+    const std::vector<int32_t> vec = {4, 16, 64, 256, 1024, 4096, 16384};
+    const std::vector<int32_t> vec2 = {4, 10, 22, 46, 94, 190, 192};
+    bool sgn = (v < 0);
+    v = std::abs(v);
+    size_t pow2 = std::upper_bound(vec2.begin(), vec2.end(), v)-vec2.begin();
+    v = ((v-vec2[pow2-1])<<pow2)+vec[pow2-1];
+    if(!sgn) v += pow2-1; 
+    return v * (sgn ? -1 : 1);
+  }
+
   // Swaps samples in position a and b. Does nothing if a == b.
   void Swap(size_t a, size_t b);
 
