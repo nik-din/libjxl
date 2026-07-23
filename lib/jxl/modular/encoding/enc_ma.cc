@@ -195,11 +195,10 @@ void FindBestCutoff(TreeSamples& tree_samples,
 
   std::vector<std::vector<std::pair<int32_t, int32_t>>> freq1(max_prop-min_prop + 1);
   for (int32_t i = 0; i < max_prop + 1; i++) {
-    for (size_t j = 0; j < max_symbols; j++) {
+    for (int32_t j = 0; j < max_symbols; j++) {
       if (freq[i][j]>0) freq1[i].push_back({j, freq[i][j]});
     }
   }
-
 
   std::vector<float> dp(max_prop-min_prop+1, 0);
   std::vector<int32_t> opt_split(max_prop-min_prop+1);
@@ -222,16 +221,12 @@ void FindBestCutoff(TreeSamples& tree_samples,
     opt_split[i] = i-1;
     
     for(int32_t j = i-1; j >= 0; j--){
-      for(size_t k = 0; k < max_symbols; k++){
-        residual_histogramm[k] += freq[j][k];
-        tot_samples += freq[j][k];
-      }
-
       if (tot_samples > 0) curr_split_cost -= tot_samples * FastLog2f(tot_samples);
       for (auto [r, f] : freq1[j]) {
         if (residual_histogramm[r] > 0) curr_split_cost += residual_histogramm[r] * FastLog2f(residual_histogramm[r]);
         curr_split_cost -= (residual_histogramm[r] + f) * FastLog2f(residual_histogramm[r] + f);
         tot_samples += f;
+        residual_histogramm[r]+=f;
       }  // ammortized cost
       if (tot_samples > 0) curr_split_cost += tot_samples * FastLog2f(tot_samples);
 
