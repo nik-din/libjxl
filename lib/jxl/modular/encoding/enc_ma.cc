@@ -185,16 +185,17 @@ void FindBestCutoff(TreeSamples& tree_samples,
     max_prop = std::max(max_prop, tree_samples.UnquantProperty<false>(0, i));
     min_prop = std::min(min_prop, tree_samples.UnquantProperty<false>(0, i));
   }
-
   std::vector<std::vector<int32_t>> freq(max_prop-min_prop+1, std::vector<int32_t>(max_symbols, 0));
+
+  float sth = 0;
 
   for(size_t i = begin; i < end; i++){
     int32_t prp = tree_samples.UnquantProperty<false>(0, i);
-    freq[prp-min_prop][tree_samples.Token(0, i)]++;
+    freq[prp-min_prop][tree_samples.Token(0, i)]+=tree_samples.Count(i);
   }
 
   std::vector<std::vector<std::pair<int32_t, int32_t>>> freq1(max_prop-min_prop + 1);
-  for (int32_t i = 0; i < max_prop + 1; i++) {
+  for (int32_t i = 0; i < max_prop-min_prop + 1; i++) {
     for (int32_t j = 0; j < max_symbols; j++) {
       if (freq[i][j]>0) freq1[i].push_back({j, freq[i][j]});
     }
@@ -203,24 +204,89 @@ void FindBestCutoff(TreeSamples& tree_samples,
   std::vector<float> dp(max_prop-min_prop+1, 0);
   std::vector<int32_t> opt_split(max_prop-min_prop+1);
 
-  const int32_t split_cost = 1;
-
-  for(int32_t i = 0; i<max_prop-min_prop+1; i++){
-    
+  const float split_cost = 1;
+  std::vector<std::vector<int32_t>> hist(max_prop-min_prop+1,std::vector<int32_t>(max_symbols,0));
+  hist[0]=freq[0];
+  for(int32_t i = 1; i < max_prop-min_prop+1; i++){
+    hist[i]=hist[i-1];
+    for(auto& [r,f]:freq1[i]){
+      hist[i][r]+=f;
+    }
+  }
+  for(int32_t i = 0; i < max_prop-min_prop+1; i++){
     std::vector<int32_t> residual_histogramm(max_symbols, 0);
     int32_t tot_samples = 0;
-    for (size_t k = 0; k < max_symbols; k++) {
-      residual_histogramm[k] += freq[i][k];
-      tot_samples += freq[i][k];
+    for(auto&[r,f]:freq1[i]){
+      residual_histogramm[r]+=f;
+      tot_samples+=f;
     }
 
-    float curr_split_cost = EstimateBits(residual_histogramm.data(), max_symbols);
+    float curr_split_cost = EstimateBits(hist[i].data(), max_symbols);
 
-    dp[i] = curr_split_cost + split_cost;
-    if(i > 0) dp[i] += dp[i-1] + FastLog2f(1+i-1);
-    opt_split[i] = i-1;
+    dp[i] = curr_split_cost;
+    //if(i > 0) dp[i] += dp[i-1] + FastLog2f(1+i-1);
+    opt_split[i] = -1;
+    //ternary search
+    int32_t sz = std::sqrt(i); //how many intervals we do have
+    for(int32_t h = 0; h<i; h+=std::max(i/sz,1)){
+      int32_t l,r,x1,x2;
+      l = h; r = std::min(h+(i/sz),i); x1 = (2*l+r)/3; x2 = (l+2*r)/3;
+      float x11,x21;
+      std::vector<int32_t>hist1=hist[i];
+      std::vector<int32_t>hist2=hist[i];
+      while(x2-x1>1){
+        //std::cerr<<"NOOOOOOOOOOOOO";
+        for(int32_t i1 = 0; i1<max_symbols; i1++){
+          if(x1>0)hist1[i1]-=hist[x1-1][i1];
+          if(x2>0)hist2[i1]-=hist[x2-1][i1];
+        }
+        x11 = EstimateBits(hist1.data(), max_symbols);
+        x21 = EstimateBits(hist2.data(), max_symbols);
+        if(x1>0)x11+=dp[x1-1]+FastLog2f(1+x1-1)*sth+split_cost; 
+        if(x2>0)x21+=dp[x2-1]+FastLog2f(1+x2-1)*sth+split_cost;
+        if(x11>x21){
+          l = x1;
+          if(x11 < dp[i] && x1>0){
+            dp[i] = x11; 
+            opt_split[i] = x1-1;
+          }
+        }
+        else{
+          r = x2+1;
+          if(x21 < dp[i] && x2>0){
+            dp[i] = x21; 
+            opt_split[i] = x2-1;
+          }
+        }
+        x1 = (2*l+r)/3; x2 = (l+2*r)/3;
+        if(x1<=0 || x2<=0)break;
+        hist1=hist[i];
+        hist2=hist[i];
+      }
+      hist1=hist[i];
+      if(x1>0)for(int32_t i1 = 0; i1<max_symbols; i1++){
+        hist1[i1]-=hist[x1-1][i1];
+      }
+      x11 = EstimateBits(hist1.data(), max_symbols);
+      if(x1>0)x11+=dp[x1-1]+split_cost;
+      if(x11 < dp[i]){
+        dp[i] = x11; 
+        opt_split[i] = x1-1;
+      }
+      hist2=hist[i];
+      if(x2>0)for(int32_t i1 = 0; i1<max_symbols; i1++){
+        hist2[i1]-=hist[x2-1][i1];
+      }
+      x21 = EstimateBits(hist2.data(), max_symbols);
+      if(x2>0)x21+=dp[x2-1]+split_cost;
+      if(x21 < dp[i]){
+        dp[i] = x21; 
+        opt_split[i] = x2-1;
+      }
+    }
+  }
     
-    for(int32_t j = i-1; j >= 0; j--){
+  /*  for(int32_t j = i-1; j >= 0; j--){
       if (tot_samples > 0) curr_split_cost -= tot_samples * FastLog2f(tot_samples);
       for (auto [r, f] : freq1[j]) {
         if (residual_histogramm[r] > 0) curr_split_cost += residual_histogramm[r] * FastLog2f(residual_histogramm[r]);
@@ -230,14 +296,14 @@ void FindBestCutoff(TreeSamples& tree_samples,
       }  // ammortized cost
       if (tot_samples > 0) curr_split_cost += tot_samples * FastLog2f(tot_samples);
 
-      float new_dp = curr_split_cost + split_cost + FastLog2f(1+j-1);
+      float new_dp = curr_split_cost + split_cost + FastLog2f(1+j-1);// to improve cost of splits
       if(j > 0) new_dp += dp[j-1];
       if(new_dp < dp[i]){
         dp[i] = new_dp; 
         opt_split[i] = j-1;
       }
     }
-  }
+  }*/
 
   std::vector<int32_t> cutoffs;
   int32_t curr = opt_split[max_prop-min_prop];
@@ -246,6 +312,9 @@ void FindBestCutoff(TreeSamples& tree_samples,
     curr = opt_split[curr];
   }
   std::sort(cutoffs.begin(), cutoffs.end());
+  //std::cerr<<'(';
+  //for(auto&a:cutoffs)std::cerr<<a<<", ";
+  //std::cerr<<")\n";
 
   Predictor pred = tree_samples.PredictorFromIndex(0);
   int32_t property = tree_samples.PropertyFromIndex(0);
