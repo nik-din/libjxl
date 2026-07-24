@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <iostream>
 
 #include "lib/jxl/base/common.h"
 #include "lib/jxl/base/status.h"
@@ -74,15 +75,6 @@ struct TreeSamples {
     }
   }
 
-  template<bool S>
-  int32_t UnquantProperty(size_t property_index, size_t i) const {
-    if (S) {
-      return unquant_static_props[property_index][i];
-    } else {
-      return unquant_props[property_index][i];
-    }
-  }
-
   int UnquantizeProperty(size_t property_index, uint32_t quant) const {
     JXL_DASSERT(quant < compact_properties[property_index].size());
     return compact_properties[property_index][quant];
@@ -128,32 +120,6 @@ struct TreeSamples {
     return static_property_mapping[prop][v];
   }
 
-  int32_t SemiQuantizeProperty(pixel_type v) const {
-    if(v >= -4 && v <= 4) 
-    return v;
-    const std::vector<int32_t> vec = {4, 16, 64, 256, 1024, 4096, 16384};
-    const std::vector<int32_t> vec2 = {4, 10, 22, 46, 94, 190, 192};
-    bool sgn = (v < 0);
-    v = std::abs(v);
-    if(v > 32768) v = 32768;
-    size_t pow2 = std::upper_bound(vec.begin(), vec.end(), v)-vec.begin();
-    v = ((v-vec[pow2-1])>>pow2)+vec2[pow2-1];
-    return v * (sgn ? -1 : 1);
-  }
-
-  int32_t UnSemiQuantizeProperty(pixel_type v) const {
-    if(v >= -4 && v <= 4) 
-    return v;
-    const std::vector<int32_t> vec = {4, 16, 64, 256, 1024, 4096, 16384};
-    const std::vector<int32_t> vec2 = {4, 10, 22, 46, 94, 190, 192};
-    bool sgn = (v < 0);
-    v = std::abs(v);
-    size_t pow2 = std::upper_bound(vec2.begin(), vec2.end(), v)-vec2.begin();
-    v = ((v-vec2[pow2-1])<<pow2)+vec[pow2-1];
-    if(!sgn) v += pow2-1; 
-    return v * (sgn ? -1 : 1);
-  }
-
   // Swaps samples in position a and b. Does nothing if a == b.
   void Swap(size_t a, size_t b);
 
@@ -189,10 +155,6 @@ struct TreeSamples {
   static constexpr uint32_t kDedupEntryUnused{static_cast<uint32_t>(-1)};
   std::vector<uint32_t> dedup_table_;
 
-  // Unquantized property values
-  std::array<std::vector<int32_t>, kNumStaticProperties> unquant_static_props;
-  // Property values, quantized to at most 256 distinct values.
-  std::vector<std::vector<int32_t>> unquant_props;
 
   // Functions for sample deduplication.
   bool IsSameSample(size_t a, size_t b) const;
