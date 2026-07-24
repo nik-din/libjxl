@@ -194,18 +194,18 @@ void FindBestCutoff(TreeSamples& tree_samples,
     freq[prp-min_prop][tree_samples.Token(0, i)]+=tree_samples.Count(i);
   }
 
-  // std::vector<std::vector<std::pair<int32_t, int32_t>>> freq1(max_prop-min_prop + 1);
-  // for (int32_t i = 0; i < max_prop + 1; i++) {
-  //   for (size_t j = 0; j < max_symbols; j++) {
-  //     if (freq[i][j]>0) freq1[i].push_back({j, freq[i][j]});
-  //   }
-  // }
-
   std::vector<float> dp(max_prop-min_prop+1, 0);
   std::vector<int32_t> opt_split(max_prop-min_prop+1);
 
-  const int32_t split_cost = 1;
-  const float split_compression = 0;
+  const float split_cost = -6;
+  const float split_compression = 1;
+  const float bit_mul = 1;
+
+  std::vector<int32_t> unquant(max_prop-min_prop+1, -1);
+  auto Unquant_lambda = [&unquant, &tree_samples](int32_t v){
+    if(unquant[v] == -1) return unquant[v] = tree_samples.UnSemiQuantizeProperty(v);
+    return unquant[v];
+  }; 
 
   for(int32_t i = 0; i<max_prop-min_prop+1; i++){
     
@@ -216,30 +216,22 @@ void FindBestCutoff(TreeSamples& tree_samples,
       tot_samples += freq[i][k];
     }
 
-    float curr_split_cost = EstimateBits(residual_histogramm.data(), max_symbols);
+    float curr_split_cost = bit_mul*EstimateBits(residual_histogramm.data(), max_symbols);
 
     dp[i] = curr_split_cost;
-    if(i > 0) dp[i] += dp[i-1] + split_compression*FastLog2f(1+i-1) + split_cost;;
+    if(i > 0) dp[i] += dp[i-1] + split_compression*FastLog2f(Unquant_lambda(i-1)+1) + split_cost;
     opt_split[i] = i-1;
     
     for(int32_t j = i-1; j >= 0; j--){
-      // if (tot_samples > 0) curr_split_cost -= tot_samples * FastLog2f(tot_samples);
-      // for (auto [r, f] : freq1[j]) {
-      //   if (residual_histogramm[r] > 0) curr_split_cost += residual_histogramm[r] * FastLog2f(residual_histogramm[r]);
-      //   curr_split_cost -= (residual_histogramm[r] + f) * FastLog2f(residual_histogramm[r] + f);
-      //   tot_samples += f;
-      //   residual_histogramm[r]+=f;
-      // }  // ammortized cost
-      // if (tot_samples > 0) curr_split_cost += tot_samples * FastLog2f(tot_samples);
 
       for(size_t k = 0; k<max_symbols; k++){
         residual_histogramm[k] += freq[j][k];
         tot_samples += freq[j][k];
       }
-      curr_split_cost = EstimateBits(residual_histogramm.data(), max_symbols);
+      curr_split_cost = bit_mul*EstimateBits(residual_histogramm.data(), max_symbols);
 
       float new_dp = curr_split_cost;
-      if(j > 0) new_dp += dp[j-1] + split_compression*FastLog2f(1+j-1)  + split_cost;
+      if(j > 0) new_dp += dp[j-1] + split_compression*FastLog2f(Unquant_lambda(j-1)+1)  + split_cost;
       if(new_dp < dp[i]){
         dp[i] = new_dp; 
         opt_split[i] = j-1;
@@ -247,18 +239,22 @@ void FindBestCutoff(TreeSamples& tree_samples,
     }
   }
 
+  float estimated_split_cost = 0;
+
   std::vector<int32_t> cutoffs;
   int32_t curr = opt_split[max_prop-min_prop];
   while(curr != -1){
     cutoffs.push_back(curr);
+    if(curr > 0) estimated_split_cost += split_compression*FastLog2f(curr)  + split_cost;
     curr = opt_split[curr];
   }
   std::sort(cutoffs.begin(), cutoffs.end());
 
-  std::cerr << '(' << cutoffs.size() << ' ' << max_prop - min_prop << ") ";
+  //std::cerr << "Bit estimated: " << dp.back() << ", Estimated data bits: " << dp.back()-estimated_split_cost  << ", Estimated tree bits: " << estimated_split_cost << ", Number of splits: " << cutoffs.size() << " / ";
+
+  // std::cerr << '(' << cutoffs.size() << ' ' << max_prop - min_prop << ") ";
 
   // for(int i: cutoffs) std::cerr << i << ' ';
-  // std::cerr << '\n';
 
   Predictor pred = tree_samples.PredictorFromIndex(0);
   int32_t property = tree_samples.PropertyFromIndex(0);
@@ -285,12 +281,14 @@ void FindBestCutoff(TreeSamples& tree_samples,
   }
 
   return;
+  
 }
 
 void FindBestSplit(TreeSamples& tree_samples, float threshold,
                    const std::vector<ModularMultiplierInfo>& mul_info,
                    StaticPropRange initial_static_prop_range,
                    float fast_decode_multiplier, Tree* tree) {
+  float dp_cost = -1;
   if (tree_samples.NumProperties() == 1) {
     FindBestCutoff(tree_samples, initial_static_prop_range, tree);
     return;
@@ -308,6 +306,10 @@ void FindBestSplit(TreeSamples& tree_samples, float threshold,
   size_t num_predictors = tree_samples.NumPredictors();
   size_t num_properties = tree_samples.NumProperties();
 
+  float greedy_cost = 0;
+  float split_cost = 32;
+  std::vector<int32_t> cutoffs;
+  
   // TODO(veluca): consider parallelizing the search (processing multiple nodes
   // at a time).
   while (!nodes.empty()) {
@@ -505,6 +507,7 @@ void FindBestSplit(TreeSamples& tree_samples, float threshold,
             }
             float rcost = EstimateBits(counts_above.data(), max_symbols) +
                           tot_extra_bits[pred] - extra_bits_below;
+            
             float lcost = EstimateBits(counts_below.data(), max_symbols) +
                           extra_bits_below;
             JXL_DASSERT(extra_bits_below <= tot_extra_bits[pred]);
@@ -597,6 +600,9 @@ void FindBestSplit(TreeSamples& tree_samples, float threshold,
           tree_samples.UnquantizeProperty(best->prop, best->val);
       // Split node and try to split children.
       MakeSplitNode(pos, p, dequant, best->lpred, 0, best->rpred, 0, tree);
+
+      cutoffs.push_back(dequant);
+
       // "Sort" according to winning property
       if (best->prop < tree_samples.NumStaticProps()) {
         SplitTreeSamples<true>(tree_samples, begin, best->pos, end, best->prop,
@@ -623,7 +629,60 @@ void FindBestSplit(TreeSamples& tree_samples, float threshold,
       nodes.push_back(
           NodeInfo{(*tree)[pos].lchild, best->pos, end, new_sp_range});
     }
+  }  
+  
+  greedy_cost += split_cost*cutoffs.size();
+
+  std::sort(cutoffs.begin(), cutoffs.end());
+  size_t begin = 0;
+  size_t end = tree_samples.NumDistinctSamples();
+  size_t max_symbols = 0;
+  for (size_t i = begin; i < end; i++) {
+    uint32_t tok = tree_samples.Token(0, i);
+    max_symbols = max_symbols > tok + 1 ? max_symbols : tok + 1;
   }
+  max_symbols = Padded(max_symbols);
+
+  int32_t max_prop = 0;
+  int32_t min_prop = 0;
+  for(size_t i = begin; i<end; i++){
+    max_prop = std::max(max_prop, tree_samples.UnquantProperty<false>(0, i));
+    min_prop = std::min(min_prop, tree_samples.UnquantProperty<false>(0, i));
+  }
+
+  int curr_cutoff = 0;
+  std::vector<std::vector<int32_t>> freq(max_prop-min_prop+1, std::vector<int32_t>(max_symbols, 0));
+
+  for(size_t i = begin; i < end; i++){
+    int32_t prp = tree_samples.UnquantProperty<false>(0, i);
+    freq[prp-min_prop][tree_samples.Token(0, i)]+=tree_samples.Count(i);
+  }
+
+  std::vector<int32_t> residual_histogramm(max_symbols, 0);
+
+  for(int32_t i = min_prop; i<=max_prop; i++){
+    if(curr_cutoff < cutoffs.size() && i > cutoffs[curr_cutoff]){
+      greedy_cost += EstimateBits(residual_histogramm.data(), max_symbols);
+      residual_histogramm.resize(max_symbols, 0);
+      curr_cutoff++;
+    }
+    for(size_t j = 0; j<max_symbols; j++) residual_histogramm[j]+=freq[i-min_prop][j];
+  }
+
+  greedy_cost += EstimateBits(residual_histogramm.data(), max_symbols);
+
+  std::cerr << dp_cost-greedy_cost << std::endl;
+  // if(dp_cost > greedy_cost){
+  //   std::cerr << "ERROR!" << std::endl;
+  //   std::cerr << "min_prop: " << min_prop << ", max_prop: " << max_prop << " Frequency array: ";
+  //   for(int i = 0; i<max_prop-min_prop+1; i++){
+  //     std::cerr << "[";
+  //     for(int j = 0; j<max_symbols; j++) std::cerr << freq[i][j] << ", ";
+  //     std::cerr << "]";
+  //   }
+  //   std::cerr << std::endl;
+  // }
+
 }
 
 // NOLINTNEXTLINE(google-readability-namespace-comments)
@@ -1176,6 +1235,9 @@ void CollectPixelSamples(const Image& image, const ModularOptions& options,
 Status TokenizeTree(const Tree& tree, std::vector<Token>* tokens,
                     Tree* decoder_tree) {
   JXL_ENSURE(tree.size() <= kMaxTreeSize);
+
+  size_t tokens_before = tokens->size();
+
   std::queue<int> q;
   q.push(0);
   size_t leaf_id = 0;
@@ -1211,6 +1273,9 @@ Status TokenizeTree(const Tree& tree, std::vector<Token>* tokens,
     q.push(tree[cur].rchild);
     tokens->emplace_back(kSplitValContext, PackSigned(tree[cur].splitval));
   }
+
+  // std::cerr << "Tree-Token " << tokens->size() - tokens_before << std::endl;
+
   return true;
 }
 

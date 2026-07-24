@@ -129,7 +129,7 @@ struct TreeSamples {
   }
 
   int32_t SemiQuantizeProperty(pixel_type v) const {
-    // if(v >= -4 && v <= 4) 
+    if(v >= -4 && v <= 4) 
     return v;
     const std::vector<int32_t> vec = {4, 16, 64, 256, 1024, 4096, 16384};
     const std::vector<int32_t> vec2 = {4, 10, 22, 46, 94, 190, 192};
@@ -142,7 +142,7 @@ struct TreeSamples {
   }
 
   int32_t UnSemiQuantizeProperty(pixel_type v) const {
-    // if(v >= -4 && v <= 4) 
+    if(v >= -4 && v <= 4) 
     return v;
     const std::vector<int32_t> vec = {4, 16, 64, 256, 1024, 4096, 16384};
     const std::vector<int32_t> vec2 = {4, 10, 22, 46, 94, 190, 192};
