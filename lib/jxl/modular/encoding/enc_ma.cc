@@ -206,8 +206,8 @@ void FindBestCutoff(TreeSamples& tree_samples,
   std::vector<float> dp(max_prop-min_prop+1, 0);
   std::vector<int32_t> opt_split(max_prop-min_prop+1);
 
-  const float split_cost = -4;
-  const float split_compression = 1;
+  const float split_cost = 110;
+  const float split_compression = 3;
   const float bit_mul = 1;
 
   for(int32_t i = 0; i<max_prop-min_prop+1; i++){
@@ -223,7 +223,7 @@ void FindBestCutoff(TreeSamples& tree_samples,
 
     dp[i] = curr_split_cost;
     if(i > 0 && exist[i] != -1){
-      dp[i] += dp[i-1] + split_compression*FastLog2f(tree_samples.UnquantizeProperty(0, exist[i])+1) + split_cost;
+      dp[i] += dp[i-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(0, exist[i]))+1) + split_cost;
     }
     opt_split[i] = exist[i];
     
@@ -237,7 +237,7 @@ void FindBestCutoff(TreeSamples& tree_samples,
 
       float new_dp = curr_split_cost;
       if(j > 0 && exist[j] != -1){
-        new_dp += dp[j-1] + split_compression*FastLog2f(tree_samples.UnquantizeProperty(0, exist[j])+1)  + split_cost;
+        new_dp += dp[j-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(0, exist[j]))+1)  + split_cost;
       }
       if(new_dp < dp[i]){
         dp[i] = new_dp; 
@@ -257,7 +257,7 @@ void FindBestCutoff(TreeSamples& tree_samples,
   }
   std::sort(cutoffs.begin(), cutoffs.end());
 
-  std::cerr << "Bit estimated: " << dp.back() << ", Estimated data bits: " << dp.back()-estimated_split_cost  << ", Estimated tree bits: " << estimated_split_cost << ", Number of splits: " << cutoffs.size() << " / ";
+  // std::cerr << "Bit estimated: " << dp.back() << ", Estimated data bits: " << dp.back()-estimated_split_cost  << ", Estimated tree bits: " << estimated_split_cost << ", Number of splits: " << cutoffs.size() <<  std::endl;
 
   Predictor pred = tree_samples.PredictorFromIndex(0);
   int32_t property = tree_samples.PropertyFromIndex(0);
