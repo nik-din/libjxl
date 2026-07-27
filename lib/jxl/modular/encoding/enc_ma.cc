@@ -193,11 +193,9 @@ void FindBestCutoff(TreeSamples& tree_samples,
     exist[prp-min_prop] = 1;
   }
 
-  int32_t num_prop_val = 0;
   int lst = -1;
   for(int32_t i = 0; i<max_prop-min_prop+1; i++){
     if(exist[i]){
-      num_prop_val++;
       exist[i] = lst; lst = i;
     }
     else exist[i] = lst;
@@ -215,10 +213,8 @@ void FindBestCutoff(TreeSamples& tree_samples,
   for(int32_t i = 0; i<max_prop-min_prop+1; i++){
     
     std::vector<int32_t> residual_histogramm(max_symbols, 0);
-    int32_t tot_samples = 0;
     for (size_t k = 0; k < max_symbols; k++) {
       residual_histogramm[k] += freq[i][k];
-      tot_samples += freq[i][k];
     }
 
     float curr_split_cost = bit_mul*EstimateBits(residual_histogramm.data(), max_symbols);
@@ -233,7 +229,6 @@ void FindBestCutoff(TreeSamples& tree_samples,
 
       for(size_t k = 0; k<max_symbols; k++){
         residual_histogramm[k] += freq[j][k];
-        tot_samples += freq[j][k];
       }
       curr_split_cost = bit_mul*EstimateBits(residual_histogramm.data(), max_symbols);
 
@@ -248,13 +243,11 @@ void FindBestCutoff(TreeSamples& tree_samples,
     }
   }
 
-  float estimated_split_cost = 0;
 
   std::vector<int32_t> cutoffs;
   int32_t curr = opt_split[max_prop-min_prop];
   while(curr != -1){
     cutoffs.push_back(curr);
-    if(curr > 0) estimated_split_cost += split_compression*FastLog2f(curr)  + split_cost;
     curr = opt_split[curr];
   }
   std::sort(cutoffs.begin(), cutoffs.end());
