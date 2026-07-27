@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include<iostream>
 
 #include "lib/jxl/base/common.h"
 #include "lib/jxl/base/status.h"
@@ -71,15 +72,6 @@ struct TreeSamples {
       return static_props[property_index][i];
     } else {
       return props[property_index][i];
-    }
-  }
-
-  template<bool S>
-  int32_t UnquantProperty(size_t property_index, size_t i) const {
-    if (S) {
-      return unquant_static_props[property_index][i];
-    } else {
-      return unquant_props[property_index][i];
     }
   }
 
@@ -162,11 +154,6 @@ struct TreeSamples {
   // Table for deduplication.
   static constexpr uint32_t kDedupEntryUnused{static_cast<uint32_t>(-1)};
   std::vector<uint32_t> dedup_table_;
-
-  // Unquantized property values
-  std::array<std::vector<int32_t>, kNumStaticProperties> unquant_static_props;
-  // Property values, quantized to at most 256 distinct values.
-  std::vector<std::vector<int32_t>> unquant_props;
 
   // Functions for sample deduplication.
   bool IsSameSample(size_t a, size_t b) const;
