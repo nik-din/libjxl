@@ -15,6 +15,8 @@
 #include <utility>
 #include <vector>
 
+#include <iostream>
+
 #include "lib/jxl/base/bits.h"
 #include "lib/jxl/base/common.h"
 #include "lib/jxl/base/compiler_specific.h"
@@ -229,7 +231,7 @@ StatusOr<Tree> LearnTree(
   float required_cost = pixel_fraction * 0.9 + 0.1;
   tree_samples.AllSamplesDone();
   JXL_RETURN_IF_ERROR(ComputeBestTree(
-      tree_samples, options.splitting_heuristics_node_threshold * required_cost,
+      tree_samples, options.splitting_heuristics_node_threshold * required_cost, options.nb_repeats,
       multiplier_info, static_prop_range, options.fast_decode_multiplier,
       &tree));
   return tree;
@@ -772,6 +774,8 @@ Status ModularGenericCompress(const Image &image, const ModularOptions &opts,
     PrintTree(*tree, aux_out->debug_prefix + "/tree_" + ToString(group_id));
   } */
 
+  size_t bits_before_encoding = writer.BitsWritten();
+
   // Write tree
   EntropyEncodingData code;
   JXL_ASSIGN_OR_RETURN(
@@ -782,6 +786,7 @@ Status ModularGenericCompress(const Image &image, const ModularOptions &opts,
   JXL_RETURN_IF_ERROR(WriteTokens(tree_tokens[0], code, 0, &writer,
                                   LayerType::ModularTree, aux_out));
 
+  
   size_t image_width = 0;
   std::vector<std::vector<Token>> tokens(1);
   // it puts `use_global_tree = true` in the header, but this is not used
@@ -798,7 +803,14 @@ Status ModularGenericCompress(const Image &image, const ModularOptions &opts,
                                      (tree.size() + 1) / 2, tokens, &code,
                                      &writer, layer, aux_out));
   (void)cost;
+
+  size_t tree_bits = writer.BitsWritten() - bits_before_encoding;
+  
   JXL_RETURN_IF_ERROR(WriteTokens(tokens[0], code, 0, &writer, layer, aux_out));
+  
+  size_t final_tree = writer.BitsWritten();    
+  // std::cerr << "Total bits: " << final_tree - bits_before_encoding << ", Data bits: "  << final_tree - bits_before_encoding - tree_bits << ", Tree bits: " << tree_bits << std::endl; 
+
 
   bits = writer.BitsWritten() - bits;
   JXL_DEBUG_V(4,

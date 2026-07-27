@@ -167,7 +167,7 @@ void CollectExtraBitsIncrease(TreeSamples& tree_samples,
 }
 
 void FindBestCutoff(TreeSamples& tree_samples,
-                    StaticPropRange initial_static_prop_range, Tree* tree) {
+                    float nb_repeats, Tree* tree) {
   size_t begin = 0;
   size_t end = tree_samples.NumDistinctSamples();
   size_t max_symbols = 0;
@@ -206,8 +206,10 @@ void FindBestCutoff(TreeSamples& tree_samples,
   std::vector<float> dp(max_prop-min_prop+1, 0);
   std::vector<int32_t> opt_split(max_prop-min_prop+1);
 
-  const float split_cost = 110;
-  const float split_compression = 3;
+  nb_repeats = 0.3;
+
+  const float split_cost = 110*nb_repeats/0.3;
+  const float split_compression = 3*nb_repeats/0.3;
   const float bit_mul = 1;
 
   for(int32_t i = 0; i<max_prop-min_prop+1; i++){
@@ -287,12 +289,12 @@ void FindBestCutoff(TreeSamples& tree_samples,
   
 }
 
-void FindBestSplit(TreeSamples& tree_samples, float threshold,
+void FindBestSplit(TreeSamples& tree_samples, float threshold, float nb_repeats,
                    const std::vector<ModularMultiplierInfo>& mul_info,
                    StaticPropRange initial_static_prop_range,
                    float fast_decode_multiplier, Tree* tree) {
   if (tree_samples.NumProperties() == 1) {
-    FindBestCutoff(tree_samples, initial_static_prop_range, tree);
+    FindBestCutoff(tree_samples, nb_repeats, tree);
     return;
   }
   struct NodeInfo {
@@ -638,7 +640,7 @@ namespace jxl {
 
 HWY_EXPORT(FindBestSplit);  // Local function.
 
-Status ComputeBestTree(TreeSamples& tree_samples, float threshold,
+Status ComputeBestTree(TreeSamples& tree_samples, float threshold, float nb_repeats,
                        const std::vector<ModularMultiplierInfo>& mul_info,
                        StaticPropRange static_prop_range,
                        float fast_decode_multiplier, Tree* tree) {
@@ -657,7 +659,7 @@ Status ComputeBestTree(TreeSamples& tree_samples, float threshold,
              std::numeric_limits<uint32_t>::max());
 
   HWY_DYNAMIC_DISPATCH(FindBestSplit)
-  (tree_samples, threshold, mul_info, static_prop_range, fast_decode_multiplier,
+  (tree_samples, threshold, nb_repeats, mul_info, static_prop_range, fast_decode_multiplier,
    tree);
 
   return true;
