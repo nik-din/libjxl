@@ -11,7 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
-#include <iostream>
+
+#include<iostream>
 
 #include "lib/jxl/base/common.h"
 #include "lib/jxl/base/status.h"
@@ -154,7 +155,6 @@ struct TreeSamples {
   // Table for deduplication.
   static constexpr uint32_t kDedupEntryUnused{static_cast<uint32_t>(-1)};
   std::vector<uint32_t> dedup_table_;
-
 
   // Functions for sample deduplication.
   bool IsSameSample(size_t a, size_t b) const;
