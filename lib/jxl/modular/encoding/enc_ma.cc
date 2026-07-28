@@ -169,7 +169,6 @@ void CollectExtraBitsIncrease(TreeSamples& tree_samples,
 void FindBestCutoff(TreeSamples& tree_samples,
                     float nb_repeats, Tree* tree) {
 
-  std::cerr << tree_samples.NumPredictors() << std::endl;                
   size_t begin = 0;
   size_t end = tree_samples.NumDistinctSamples();
   std::vector<size_t> max_symbols(tree_samples.NumPredictors(), 0);
@@ -249,7 +248,7 @@ void FindBestCutoff(TreeSamples& tree_samples,
     pred_split[i] = split_pred;
     dp[i] = curr_split_cost;
     if(i > 0 && exist[i] != -1){
-      dp[i] += dp[i-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(0, exist[i]))+1) + split_cost;
+      dp[i] += dp[i-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(tree_samples.NumStaticProps(), exist[i]))+1) + split_cost;
     }
     opt_split[i] = exist[i];
     
@@ -263,7 +262,7 @@ void FindBestCutoff(TreeSamples& tree_samples,
       auto [curr_split_cost, split_pred] = calc_costs();
       float new_dp = curr_split_cost;
       if(j > 0 && exist[j] != -1){
-        new_dp += dp[j-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(0, exist[j]))+1)  + split_cost;
+        new_dp += dp[j-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(tree_samples.NumStaticProps(), exist[j]))+1)  + split_cost;
       }
       if(new_dp < dp[i]){
         dp[i] = new_dp; 
@@ -286,12 +285,8 @@ void FindBestCutoff(TreeSamples& tree_samples,
   std::sort(cutoffs.begin(), cutoffs.end());
   std::reverse(cutoffs_predictors.begin(), cutoffs_predictors.end());
 
-  for(int32_t i : cutoffs_predictors) std::cerr << i << ' '; std::cerr << std::endl;
-  for(int32_t i : cutoffs) std::cerr << i << ' '; std::cerr << std::endl;
-
   // std::cerr << "Bit estimated: " << dp.back() << ", Estimated data bits: " << dp.back()-estimated_split_cost  << ", Estimated tree bits: " << estimated_split_cost << ", Number of splits: " << cutoffs.size() <<  std::endl;
 
-  jxl::Predictor pred = tree_samples.PredictorFromIndex(0);
   int32_t property = tree_samples.PropertyFromIndex(0);
 
   struct NodeInfo {
@@ -299,7 +294,7 @@ void FindBestCutoff(TreeSamples& tree_samples,
   };
   std::queue<NodeInfo> q;
   // Leaf IDs will be set by roundtrip decoding the tree.
-  tree->back() = PropertyDecisionNode::Leaf(pred);
+  tree->back() = PropertyDecisionNode::Leaf(tree_samples.PredictorFromIndex(cutoffs_predictors[0]));
   q.push(NodeInfo{0, cutoffs.size(), 0});
 
   while (!q.empty()) {
@@ -307,14 +302,12 @@ void FindBestCutoff(TreeSamples& tree_samples,
     q.pop();
     if (info.begin == info.end) continue;
     uint32_t split = (info.begin + info.end) / 2;
-    int32_t cutoff = tree_samples.UnquantizeProperty(0, cutoffs[split]);
+    int32_t cutoff = tree_samples.UnquantizeProperty(tree_samples.NumStaticProps(), cutoffs[split]);
     (*tree)[info.pos] = PropertyDecisionNode::Split(property, cutoff, tree->size());
     q.push(NodeInfo{split + 1, info.end, tree->size()});
-    // tree->push_back(PropertyDecisionNode::Leaf(tree_samples.PredictorFromIndex(cutoffs_predictors[split+1])));
-    tree->push_back(PropertyDecisionNode::Leaf(pred));
+    tree->push_back(PropertyDecisionNode::Leaf(tree_samples.PredictorFromIndex(cutoffs_predictors[split+1])));
     q.push(NodeInfo{info.begin, split, tree->size()});
-    // tree->push_back(PropertyDecisionNode::Leaf(tree_samples.PredictorFromIndex(cutoffs_predictors[split])));
-    tree->push_back(PropertyDecisionNode::Leaf(pred));
+    tree->push_back(PropertyDecisionNode::Leaf(tree_samples.PredictorFromIndex(cutoffs_predictors[split])));
   }
 
   return;
@@ -325,10 +318,10 @@ void FindBestSplit(TreeSamples& tree_samples, float threshold, float nb_repeats,
                    const std::vector<ModularMultiplierInfo>& mul_info,
                    StaticPropRange initial_static_prop_range,
                    float fast_decode_multiplier, Tree* tree) {
-  // if (tree_samples.NumProperties() == 1) {
+  if (tree_samples.NumProperties() - tree_samples.NumStaticProps() > 0) {
     FindBestCutoff(tree_samples, nb_repeats, tree);
     return;
-  // }
+  }
   struct NodeInfo {
     size_t pos;
     size_t begin;
