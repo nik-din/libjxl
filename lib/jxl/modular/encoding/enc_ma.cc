@@ -287,7 +287,7 @@ void FindBestCutoff(TreeSamples& tree_samples,
 
   // std::cerr << "Bit estimated: " << dp.back() << ", Estimated data bits: " << dp.back()-estimated_split_cost  << ", Estimated tree bits: " << estimated_split_cost << ", Number of splits: " << cutoffs.size() <<  std::endl;
 
-  int32_t property = tree_samples.PropertyFromIndex(0);
+  int32_t property = tree_samples.PropertyFromIndex(tree_samples.NumStaticProps());
 
   struct NodeInfo {
     size_t begin, end, pos;
