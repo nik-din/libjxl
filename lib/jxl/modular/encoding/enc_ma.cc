@@ -166,167 +166,156 @@ void CollectExtraBitsIncrease(TreeSamples& tree_samples,
   }
 }
 
-void FindBestCutoff(TreeSamples& tree_samples,
-                    StaticPropRange initial_static_prop_range, Tree* tree) {
-  const float split_cost = 110;
-  const float split_compression = 3;
-  const float bit_mul = 1;
-  float best_cost = 0;
-  size_t best_property = 0;
-  std::vector<int32_t> best_cutoffs;
-  //std::cerr<<"HI";
-  for(size_t dim = 0; dim < tree_samples.NumProperties()-tree_samples.NumStaticProps(); dim++){
-    //bool B = dim < tree_samples.NumStaticProps();
-    //int32_t k = tree_samples.NumStaticProps();
-    size_t begin = 0;
-    size_t end = tree_samples.NumDistinctSamples();
-    size_t max_symbols = 0;
-    for (size_t i = begin; i < end; i++) {
-      uint32_t tok = tree_samples.Token(0, i);
-      max_symbols = max_symbols > tok + 1 ? max_symbols : tok + 1;
+const float split_cost = 110;
+const float split_compression = 3;
+const float bit_mul = 1;
+
+void 1d_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t pos, int32_t dim){
+  
+  if(dim >= tree_samples.NumProperties()-tree_samples.NumStaticProps())return;
+
+  size_t begin = 0;
+  size_t end = tree_samples.NumDistinctSamples();
+  size_t max_symbols = 0;
+  for (size_t i = begin; i < end; i++) {
+    uint32_t tok = tree_samples.Token(0, i);
+    max_symbols = max_symbols > tok + 1 ? max_symbols : tok + 1;
+  }
+  max_symbols = Padded(max_symbols);
+  int32_t max_prop = 0;
+  int32_t min_prop = 0;
+  for(size_t i = begin; i<end; i++){
+    max_prop = std::max(max_prop, (int32_t) tree_samples.Property<false>(dim, i));
+    min_prop = std::min(min_prop, (int32_t) tree_samples.Property<false>(dim, i));
+  }
+  std::vector<std::vector<int32_t>> freq(max_prop-min_prop+1, std::vector<int32_t>(max_symbols, 0));
+  std::vector<int32_t> exist(max_prop-min_prop+1, 0);
+
+  for(size_t i = begin; i < end; i++){
+    int32_t prp = tree_samples.Property<false>(dim, i);
+    freq[prp-min_prop][tree_samples.Token(0, i)]+=tree_samples.Count(i);//?
+    exist[prp-min_prop] = 1;
+  }
+
+  int32_t num_prop_val = 0;
+  int lst = -1;
+  for(int32_t i = 0; i<max_prop-min_prop+1; i++){
+    if(exist[i]){
+      num_prop_val++;
+      exist[i] = lst; lst = i;
     }
-    max_symbols = Padded(max_symbols);
-    int32_t max_prop = 0;
-    int32_t min_prop = 0;
-    for(size_t i = begin; i<end; i++){
-      max_prop = std::max(max_prop, (int32_t) tree_samples.Property<false>(dim, i));
-      min_prop = std::min(min_prop, (int32_t) tree_samples.Property<false>(dim, i));
-    }
-    std::vector<std::vector<int32_t>> freq(max_prop-min_prop+1, std::vector<int32_t>(max_symbols, 0));
-    std::vector<int32_t> exist(max_prop-min_prop+1, 0);
-
-    for(size_t i = begin; i < end; i++){
-      int32_t prp = tree_samples.Property<false>(dim, i);
-      freq[prp-min_prop][tree_samples.Token(0, i)]+=tree_samples.Count(i);//?
-      exist[prp-min_prop] = 1;
-    }
-
-    int32_t num_prop_val = 0;
-    int lst = -1;
-    for(int32_t i = 0; i<max_prop-min_prop+1; i++){
-      if(exist[i]){
-        num_prop_val++;
-        exist[i] = lst; lst = i;
-      }
-      else {
-        exist[i] = lst;
-      }
-    }
-
-    std::vector<float> dp(max_prop-min_prop+1, 0);
-    std::vector<int32_t> opt_split(max_prop-min_prop+1);
-    std::vector<std::vector<int32_t>> hist(max_prop-min_prop+1,std::vector<int32_t>(max_symbols,0));
-    for(int32_t i = 0; i<max_symbols; i++) hist[0][i]=freq[0][i];
-    for(int32_t i = 1; i < max_prop-min_prop+1; i++){
-      for(int32_t j = 0; j < max_symbols; j++){
-        hist[i][j]=hist[i-1][j]+freq[i][j];
-      }
-    }
-
-    for(int32_t i = 0; i<max_prop-min_prop+1; i++){
-      
-      std::vector<int32_t> residual_histogramm(max_symbols, 0);
-      int32_t tot_samples = 0;
-      for (size_t k = 0; k < max_symbols; k++) {
-        residual_histogramm[k] += freq[i][k];
-        tot_samples += freq[i][k];
-      }
-
-      float curr_split_cost = bit_mul*EstimateBits(residual_histogramm.data(), max_symbols);
-
-      dp[i] = curr_split_cost;
-      if(i > 0 && exist[i] != -1){
-        dp[i] += dp[i-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), exist[i]))+1) + split_cost;
-      }
-      opt_split[i] = exist[i];
-      
-      int32_t sz = 1; //how many intervals we do have
-      for(int32_t k = 0; k<i; k+=std::max(i/sz,1)){
-        int32_t l,r,x1,x2;
-        l = k; r = std::min(k+(i/sz),i); x1 = (2*l+r)/3; x2 = (l+2*r)/3;
-        float x11=0,x21=0;
-        std::vector<int32_t>hist1=hist[i];
-        std::vector<int32_t>hist2=hist[i];
-        while(x2-x1>1){//check on this
-          for(int32_t i1 = 0; i1<max_symbols; i1++){
-            if(x1>0)hist1[i1]-=hist[x1-1][i1];
-            if(x2>0)hist2[i1]-=hist[x2-1][i1];
-          }
-          x11 = EstimateBits(hist1.data(), max_symbols);
-          x21 = EstimateBits(hist2.data(), max_symbols);
-          if(x1>0 && exist[x1]!=-1)x11+=dp[x1-1]+split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), exist[x1]))+1)+split_cost; 
-          if(x2>0 && exist[x2]!=-1)x21+=dp[x2-1]+split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), exist[x2]))+1)+split_cost;
-          if(x11>x21){
-            l = x1;
-            if(x11 < dp[i]){
-              dp[i] = x11; 
-              opt_split[i] = exist[x1];
-            }
-          }
-          else{
-            r = x2+1;
-            if(x21 < dp[i]){
-              dp[i] = x21; 
-              opt_split[i] = exist[x2];
-            }
-          }
-          x1 = (2*l+r)/3; x2 = (l+2*r)/3;
-          hist1=hist[i];
-          hist2=hist[i];
-        }
-
-        hist1 = hist[i];
-        for(size_t h = 0; h<max_symbols; h++){
-          if(x1>0) hist1[h] -= hist[x1-1][h];
-        }
-
-        curr_split_cost = bit_mul*EstimateBits(hist1.data(), max_symbols);
-
-        float new_dp = curr_split_cost;
-        if(x1 > 0 && exist[x1] != -1){
-          new_dp += dp[x1-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), exist[x1]))+1)  + split_cost;
-        }
-        if(new_dp < dp[i]){
-          dp[i] = new_dp; 
-          opt_split[i] = exist[x1];
-        }
-        hist2 = hist[i];
-        for(size_t h = 0; h<max_symbols; h++){
-          if(x2>0)hist2[h] -= hist[x2-1][h];
-        }
-
-        curr_split_cost = bit_mul*EstimateBits(hist2.data(), max_symbols);
-
-        new_dp = curr_split_cost;
-        if(x2 > 0 && exist[x2] != -1){
-          new_dp += dp[x2-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), exist[x2]))+1)  + split_cost;
-        }
-        if(new_dp < dp[i]){
-          dp[i] = new_dp; 
-          opt_split[i] = exist[x2];
-        }
-      }
-    }
-
-    float estimated_split_cost = 0;
-
-    std::vector<int32_t> cutoffs;
-    int32_t curr = opt_split[max_prop-min_prop];
-    while(curr != -1){
-      cutoffs.push_back(curr);
-      if(curr > 0) estimated_split_cost += split_compression*FastLog2f(curr)  + split_cost;
-      curr = opt_split[curr];
-    }
-    std::sort(cutoffs.begin(), cutoffs.end());
-    if(dp[max_prop-min_prop]<=best_cost || (dim==0)){
-      best_cost = dp[max_prop-min_prop];
-      best_property = dim;
-      best_cutoffs = cutoffs;
+    else {
+      exist[i] = lst;
     }
   }
 
+  std::vector<float> dp(max_prop-min_prop+1, 0);
+  std::vector<int32_t> opt_split(max_prop-min_prop+1);
+  std::vector<std::vector<int32_t>> hist(max_prop-min_prop+1,std::vector<int32_t>(max_symbols,0));
+  for(int32_t i = 0; i<max_symbols; i++) hist[0][i]=freq[0][i];
+  for(int32_t i = 1; i < max_prop-min_prop+1; i++){
+    for(int32_t j = 0; j < max_symbols; j++){
+      hist[i][j]=hist[i-1][j]+freq[i][j];
+    }
+  }
+
+  for(int32_t i = 0; i<max_prop-min_prop+1; i++){
+    
+    std::vector<int32_t> residual_histogramm(max_symbols, 0);
+    int32_t tot_samples = 0;
+    for (size_t k = 0; k < max_symbols; k++) {
+      residual_histogramm[k] += freq[i][k];
+      tot_samples += freq[i][k];
+    }
+
+    float curr_split_cost = bit_mul*EstimateBits(residual_histogramm.data(), max_symbols);
+
+    dp[i] = curr_split_cost;
+    if(i > 0 && exist[i] != -1){
+      dp[i] += dp[i-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), exist[i]))+1) + split_cost;
+    }
+    opt_split[i] = exist[i];
+    
+    int32_t sz = 1; //how many intervals we do have
+    for(int32_t k = 0; k<i; k+=std::max(i/sz,1)){
+      int32_t l,r,x1,x2;
+      l = k; r = std::min(k+(i/sz),i); x1 = (2*l+r)/3; x2 = (l+2*r)/3;
+      float x11=0,x21=0;
+      std::vector<int32_t>hist1=hist[i];
+      std::vector<int32_t>hist2=hist[i];
+      while(x2-x1>1){//check on this
+        for(int32_t i1 = 0; i1<max_symbols; i1++){
+          if(x1>0)hist1[i1]-=hist[x1-1][i1];
+          if(x2>0)hist2[i1]-=hist[x2-1][i1];
+        }
+        x11 = EstimateBits(hist1.data(), max_symbols);
+        x21 = EstimateBits(hist2.data(), max_symbols);
+        if(x1>0 && exist[x1]!=-1)x11+=dp[x1-1]+split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), exist[x1]))+1)+split_cost; 
+        if(x2>0 && exist[x2]!=-1)x21+=dp[x2-1]+split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), exist[x2]))+1)+split_cost;
+        if(x11>x21){
+          l = x1;
+          if(x11 < dp[i]){
+            dp[i] = x11; 
+            opt_split[i] = exist[x1];
+          }
+        }
+        else{
+          r = x2+1;
+          if(x21 < dp[i]){
+            dp[i] = x21; 
+            opt_split[i] = exist[x2];
+          }
+        }
+        x1 = (2*l+r)/3; x2 = (l+2*r)/3;
+        hist1=hist[i];
+        hist2=hist[i];
+      }
+
+      hist1 = hist[i];
+      for(size_t h = 0; h<max_symbols; h++){
+        if(x1>0) hist1[h] -= hist[x1-1][h];
+      }
+
+      curr_split_cost = bit_mul*EstimateBits(hist1.data(), max_symbols);
+
+      float new_dp = curr_split_cost;
+      if(x1 > 0 && exist[x1] != -1){
+        new_dp += dp[x1-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), exist[x1]))+1)  + split_cost;
+      }
+      if(new_dp < dp[i]){
+        dp[i] = new_dp; 
+        opt_split[i] = exist[x1];
+      }
+      hist2 = hist[i];
+      for(size_t h = 0; h<max_symbols; h++){
+        if(x2>0)hist2[h] -= hist[x2-1][h];
+      }
+
+      curr_split_cost = bit_mul*EstimateBits(hist2.data(), max_symbols);
+
+      new_dp = curr_split_cost;
+      if(x2 > 0 && exist[x2] != -1){
+        new_dp += dp[x2-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), exist[x2]))+1)  + split_cost;
+      }
+      if(new_dp < dp[i]){
+        dp[i] = new_dp; 
+        opt_split[i] = exist[x2];
+      }
+    }
+  }
+
+  float estimated_split_cost = 0;
+
+  std::vector<int32_t> cutoffs;
+  int32_t curr = opt_split[max_prop-min_prop];
+  while(curr != -1){
+    cutoffs.push_back(curr);
+    if(curr > 0) estimated_split_cost += split_compression*FastLog2f(curr)  + split_cost;
+    curr = opt_split[curr];
+  }
+  std::sort(cutoffs.begin(), cutoffs.end());
   Predictor pred = tree_samples.PredictorFromIndex(0);
-  int32_t property = tree_samples.PropertyFromIndex(best_property+tree_samples.NumStaticProps());
+  int32_t property = tree_samples.PropertyFromIndex(dim+tree_samples.NumStaticProps());
 
   struct NodeInfo {
     size_t begin, end, pos;
@@ -334,19 +323,29 @@ void FindBestCutoff(TreeSamples& tree_samples,
   std::queue<NodeInfo> q;
   // Leaf IDs will be set by roundtrip decoding the tree.
   tree->back() = PropertyDecisionNode::Leaf(pred);
-  q.push(NodeInfo{0, best_cutoffs.size(), 0});
+  q.push(NodeInfo{0, cutoffs.size(), 0});
 
   while (!q.empty()) {
     NodeInfo info = q.front();
     q.pop();
     if (info.begin == info.end) continue;
     uint32_t split = (info.begin + info.end) / 2;
-    int32_t cutoff = tree_samples.UnquantizeProperty(best_property+tree_samples.NumStaticProps(), best_cutoffs[split]);
+    int32_t cutoff = tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), cutoffs[split]);
     (*tree)[info.pos] = PropertyDecisionNode::Split(property, cutoff, tree->size());
     q.push(NodeInfo{split + 1, info.end, tree->size()});
     tree->push_back(PropertyDecisionNode::Leaf(pred));
     q.push(NodeInfo{info.begin, split, tree->size()});
     tree->push_back(PropertyDecisionNode::Leaf(pred));
+  }
+  return;
+}
+
+void FindBestCutoff(TreeSamples& tree_samples,
+                    StaticPropRange initial_static_prop_range, Tree* tree) {
+  std::vector<int32_t> tree_cutoffs;
+
+  for(size_t dim = 0; dim < tree_samples.NumProperties()-tree_samples.NumStaticProps(); dim++){
+    //
   }
 
   return;
