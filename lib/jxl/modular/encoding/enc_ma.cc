@@ -171,7 +171,7 @@ const float split_cost = 110;
 const float split_compression = 3;
 const float bit_mul = 1;
 
-void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t pos, int32_t dim){
+void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, int32_t dim){
   //l and r are the indices of the range of "needed" pixels in tree samples [,)
   
   if(dim >= tree_samples.NumProperties()-tree_samples.NumStaticProps())return;
@@ -335,10 +335,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     size_t begin, end, pos;
   };
   std::queue<NodeInfo> q;
-  // Leaf IDs will be set by roundtrip decoding the tree.
-  tree->back() = PropertyDecisionNode::Leaf(pred);
-  q.push(NodeInfo{0, cutoffs.size()-1, 0}); //should be -1
-
+  q.push(NodeInfo{0, cutoffs.size()-1, tree_pos}); 
   while (!q.empty()) {
     NodeInfo info = q.front();
     q.pop();
@@ -366,12 +363,11 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
 
 void FindBestCutoff(TreeSamples& tree_samples,
                     StaticPropRange initial_static_prop_range, Tree* tree) {
-  std::vector<int32_t> tree_cutoffs;
-
-  for(size_t dim = 0; dim < tree_samples.NumProperties()-tree_samples.NumStaticProps(); dim++){
-    //
-  }
-
+  // Leaf IDs will be set by roundtrip decoding the tree.
+  Predictor pred = tree_samples.PredictorFromIndex(0);
+  tree->back() = PropertyDecisionNode::Leaf(pred);
+  
+  oned_split_rec(tree_samples, 0, tree_samples.NumDistinctSamples(), tree, 0, 0);
   return;
   
 }
