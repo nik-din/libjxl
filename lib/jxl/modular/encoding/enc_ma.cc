@@ -167,9 +167,9 @@ void CollectExtraBitsIncrease(TreeSamples& tree_samples,
   }
 }
 
-const float split_cost = 110;
-const float split_compression = 3;
-const float bit_mul = 1;
+float split_cost = 220;
+float split_compression = 7;
+float bit_mul = 1;
 
 void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos){
   //l and r are the indices of the range of "needed" pixels in tree samples [,)
@@ -349,23 +349,27 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
 }
 
 void FindBestCutoff(TreeSamples& tree_samples,
-                    StaticPropRange initial_static_prop_range, Tree* tree) {
+                    float nb_repeats, Tree* tree) {
   // Leaf IDs will be set by roundtrip decoding the tree.
   Predictor pred = tree_samples.PredictorFromIndex(0);
   tree->back() = PropertyDecisionNode::Leaf(pred);
   
+  split_cost *= nb_repeats;
+  split_compression *= nb_repeats;
+
   oned_split_rec(tree_samples, 0, tree_samples.NumDistinctSamples(), tree, 0);
   return;
   
 }
 
-void FindBestSplit(TreeSamples& tree_samples, float threshold,
+void FindBestSplit(TreeSamples& tree_samples, float threshold, 
+                   float nb_repeat,
                    const std::vector<ModularMultiplierInfo>& mul_info,
                    StaticPropRange initial_static_prop_range,
                    float fast_decode_multiplier, Tree* tree) {
   //std::cerr<<"Num properties: "<<tree_samples.NumProperties() <<"\n\n";
   tree_samples.NumProperties();
-  FindBestCutoff(tree_samples, initial_static_prop_range, tree);
+  FindBestCutoff(tree_samples, nb_repeat, tree);
   return;
     
   struct NodeInfo {
@@ -711,7 +715,7 @@ namespace jxl {
 
 HWY_EXPORT(FindBestSplit);  // Local function.
 
-Status ComputeBestTree(TreeSamples& tree_samples, float threshold,
+Status ComputeBestTree(TreeSamples& tree_samples, float threshold, float nb_repeat,
                        const std::vector<ModularMultiplierInfo>& mul_info,
                        StaticPropRange static_prop_range,
                        float fast_decode_multiplier, Tree* tree) {
@@ -730,7 +734,7 @@ Status ComputeBestTree(TreeSamples& tree_samples, float threshold,
              std::numeric_limits<uint32_t>::max());
 
   HWY_DYNAMIC_DISPATCH(FindBestSplit)
-  (tree_samples, threshold, mul_info, static_prop_range, fast_decode_multiplier,
+  (tree_samples, threshold, nb_repeat, mul_info, static_prop_range, fast_decode_multiplier,
    tree);
 
   return true;
