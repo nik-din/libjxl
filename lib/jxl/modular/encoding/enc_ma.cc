@@ -14,6 +14,7 @@
 #include <numeric>
 #include <queue>
 #include <vector>
+#include <unordered_map>
 
 #include "lib/jxl/ans_params.h"
 #include "lib/jxl/base/bits.h"
@@ -128,8 +129,8 @@ IntersectionType BoxIntersects(StaticPropRange needle, StaticPropRange haystack,
 }
 
 template <bool S>
-void SplitTreeSamples(TreeSamples& tree_samples, size_t begin, size_t pos,
-                      size_t end, size_t prop, uint32_t val) {
+void SplitTreeSamples(TreeSamples& tree_samples, size_t begin, size_t pos, //begin: start of interval to "sort", end: end of interval to sort, 
+                      size_t end, size_t prop, uint32_t val) { //pos: number of things smaller than val in the range + begin
   size_t begin_pos = begin;
   size_t end_pos = pos;
   do {
@@ -170,12 +171,13 @@ const float split_cost = 110;
 const float split_compression = 3;
 const float bit_mul = 1;
 
-void 1d_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t pos, int32_t dim){
+void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t pos, int32_t dim){
+  //l and r are the indices of the range of "needed" pixels in tree samples [,)
   
   if(dim >= tree_samples.NumProperties()-tree_samples.NumStaticProps())return;
-
-  size_t begin = 0;
-  size_t end = tree_samples.NumDistinctSamples();
+  
+  size_t begin = l;
+  size_t end = r;
   size_t max_symbols = 0;
   for (size_t i = begin; i < end; i++) {
     uint32_t tok = tree_samples.Token(0, i);
@@ -188,13 +190,20 @@ void 1d_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, s
     max_prop = std::max(max_prop, (int32_t) tree_samples.Property<false>(dim, i));
     min_prop = std::min(min_prop, (int32_t) tree_samples.Property<false>(dim, i));
   }
+
+  std::vector<int32_t> poss (max_prop-min_prop+1, 0); //vector of pos needed for the SplitTreeSamles function (things with prop <= val)
   std::vector<std::vector<int32_t>> freq(max_prop-min_prop+1, std::vector<int32_t>(max_symbols, 0));
   std::vector<int32_t> exist(max_prop-min_prop+1, 0);
 
   for(size_t i = begin; i < end; i++){
     int32_t prp = tree_samples.Property<false>(dim, i);
-    freq[prp-min_prop][tree_samples.Token(0, i)]+=tree_samples.Count(i);//?
+    freq[prp-min_prop][tree_samples.Token(0, i)]+=tree_samples.Count(i);
     exist[prp-min_prop] = 1;
+  }
+
+  poss[0] = tree_samples.Count(0);
+  for(size_t i = 1; i < max_prop-min_prop+1; i++){
+    poss[i]=poss[i-1]+tree_samples.Count(i);
   }
 
   int32_t num_prop_val = 0;
@@ -314,8 +323,13 @@ void 1d_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, s
     curr = opt_split[curr];
   }
   std::sort(cutoffs.begin(), cutoffs.end());
+
   Predictor pred = tree_samples.PredictorFromIndex(0);
   int32_t property = tree_samples.PropertyFromIndex(dim+tree_samples.NumStaticProps());
+
+  for(auto&a:cutoffs){
+    SplitTreeSamples<false>(tree_samples, (size_t)l, (size_t)l+poss[a], (size_t)r, (size_t)dim, (uint32_t) a);//off by ones on boundary?
+  }
 
   struct NodeInfo {
     size_t begin, end, pos;
@@ -323,12 +337,22 @@ void 1d_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, s
   std::queue<NodeInfo> q;
   // Leaf IDs will be set by roundtrip decoding the tree.
   tree->back() = PropertyDecisionNode::Leaf(pred);
-  q.push(NodeInfo{0, cutoffs.size(), 0});
+  q.push(NodeInfo{0, cutoffs.size()-1, 0}); //should be -1
 
   while (!q.empty()) {
     NodeInfo info = q.front();
     q.pop();
-    if (info.begin == info.end) continue;
+    if (info.begin == info.end){
+      if(info.begin==0){
+        oned_split_rec(tree_samples, l, l+poss[cutoffs[info.begin]]+1, tree, info.pos, dim+1); 
+      }
+      else if(info.begin==cutoffs.size()-1){
+        oned_split_rec(tree_samples, l+poss[cutoffs[info.begin-1]], l+poss[cutoffs[info.begin]]+1, tree, info.pos, dim+1); 
+        oned_split_rec(tree_samples, l+poss[cutoffs[info.begin]], r, tree, info.pos, dim+1); 
+      }  
+      oned_split_rec(tree_samples, l+poss[cutoffs[info.begin-1]], l+poss[cutoffs[info.begin]]+1, tree, info.pos, dim+1); 
+      continue;
+    }
     uint32_t split = (info.begin + info.end) / 2;
     int32_t cutoff = tree_samples.UnquantizeProperty(dim+tree_samples.NumStaticProps(), cutoffs[split]);
     (*tree)[info.pos] = PropertyDecisionNode::Split(property, cutoff, tree->size());
