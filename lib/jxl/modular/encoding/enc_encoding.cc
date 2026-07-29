@@ -230,7 +230,8 @@ StatusOr<Tree> LearnTree(
   float required_cost = pixel_fraction * 0.9 + 0.1;
   tree_samples.AllSamplesDone();
   JXL_RETURN_IF_ERROR(ComputeBestTree(
-      tree_samples, options.splitting_heuristics_node_threshold * required_cost,
+      tree_samples, options.splitting_heuristics_node_threshold * required_cost, 
+      options.nb_repeats,
       multiplier_info, static_prop_range, options.fast_decode_multiplier,
       &tree));
   return tree;
