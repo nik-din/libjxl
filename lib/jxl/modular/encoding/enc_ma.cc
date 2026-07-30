@@ -167,11 +167,12 @@ void CollectExtraBitsIncrease(TreeSamples& tree_samples,
   }
 }
 
-float split_cost = 300;
-float split_compression = 7;
+float split_cost = 220;
+float split_compression = 4;
 float bit_mul = 1;
+float rec_mul = -3;
 
-void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos){
+void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, size_t depth){
   //l and r are the indices of the range of "needed" pixels in tree samples [,)
   
   if(0 == tree_samples.NumProperties()-tree_samples.NumStaticProps())return;
@@ -271,7 +272,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
       pred_split[i] = split_pred;
       dp[i] = curr_split_cost;
       if(i > 0 && exist[i] != -1){
-        dp[i] += dp[i-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim, exist[i]))+1) + split_cost;
+        dp[i] += dp[i-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim, exist[i] + min_prop))+1) + split_cost + rec_mul*depth;
       }
       opt_split[i] = exist[i];
       
@@ -285,7 +286,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
         auto [curr_split_cost, split_pred] = calc_costs();
         float new_dp = curr_split_cost;
         if(j > 0 && exist[j] != -1){
-          new_dp += dp[j-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim, exist[j]))+1)  + split_cost;
+          new_dp += dp[j-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim, exist[j] + min_prop))+1)  + split_cost + rec_mul*depth;
         }
         if(new_dp < dp[i]){
           dp[i] = new_dp; 
@@ -300,7 +301,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     cutoffs_predictors.push_back(pred_split[max_prop-min_prop]);
     int32_t curr = opt_split[max_prop-min_prop];
     while(curr != -1){
-      cutoffs.push_back(curr);
+      cutoffs.push_back(curr + min_prop);
       cutoffs_predictors.push_back(pred_split[curr]);
       curr = opt_split[curr];
     }
@@ -336,12 +337,12 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     q.pop();
     if (info.begin == info.end){
       if(info.begin==0 && best_cutoffs[0] > 0){
-        oned_split_rec(tree_samples, l, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos); 
+        oned_split_rec(tree_samples, l, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos, depth+1); 
       }
       else if(info.begin==best_cutoffs.size()){
-        oned_split_rec(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, r, tree, info.pos); 
+        oned_split_rec(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, r, tree, info.pos, depth+1); 
       }  
-      else oned_split_rec(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos); 
+      else oned_split_rec(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos, depth+1); 
       continue;
     }
     uint32_t split = (info.begin + info.end) / 2;
@@ -364,7 +365,7 @@ void FindBestCutoff(TreeSamples& tree_samples,
   split_cost *= nb_repeats;
   split_compression *= nb_repeats;
 
-  oned_split_rec(tree_samples, 0, tree_samples.NumDistinctSamples(), tree, 0);
+  oned_split_rec(tree_samples, 0, tree_samples.NumDistinctSamples(), tree, 0, 0);
   return;
   
 }
