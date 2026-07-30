@@ -171,13 +171,13 @@ const float bit_mul = 1;
 
 const float split_cost = 220;
 const float split_compression = 4;
-const float rec_mul = -1; 
-const float sq_rec = -4;
+const float rec_mul = -6; 
+const float sq_rec = 0;
 int32_t deep = 0;
 int32_t splits_num = 0;
 
 float split_cost_f(size_t depth, int32_t x, TreeSamples& tree_samples, size_t dim, int32_t m_prop){
-  return split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim, x+m_prop))+1) + split_cost + depth*rec_mul + depth*depth*sq_rec;
+  return split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim, x + m_prop))+1) + split_cost + depth*rec_mul + depth*depth*sq_rec;
 }
 
 void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, size_t depth){
