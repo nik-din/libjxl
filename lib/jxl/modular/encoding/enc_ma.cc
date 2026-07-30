@@ -174,7 +174,7 @@ float rec_mul = -3;
 
 void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, size_t depth){
   //l and r are the indices of the range of "needed" pixels in tree samples [,)
-  std::cerr << __LINE__ << std::endl;
+  // std::cerr << __LINE__ << std::end7l;
   if(l == r) return;
   
   if(0 == tree_samples.NumProperties()-tree_samples.NumStaticProps()) return;
@@ -186,7 +186,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
   std::vector<int32_t> best_poss;
   
   for(size_t dim = 0; dim < tree_samples.NumProperties(); dim++){  
-    std::cerr << __LINE__ << std::endl;
+    // std::cerr << __LINE__ << std::endl;
     bool is_static = dim < tree_samples.NumStaticProps();
 
     auto GetProperty = [&](size_t prop, size_t index)->size_t{
@@ -217,7 +217,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     std::vector<int32_t> poss (max_prop-min_prop+1, 0); //vector of pos needed for the SplitTreeSamles function (things with prop <= val)
     std::vector<std::vector<std::vector<int32_t>>> freq(tree_samples.NumPredictors(), std::vector<std::vector<int32_t>>(max_prop-min_prop+1)); 
     std::vector<int32_t> exist(max_prop-min_prop+1, 0);
-    std::cerr << __LINE__ << std::endl;
+    // std::cerr << __LINE__ << std::endl;
 
     for(size_t j = 0; j < tree_samples.NumPredictors(); j++){
       for(int32_t i = 0; i < max_prop-min_prop+1; i++){
@@ -234,7 +234,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     for(int32_t i = 1; i < max_prop - min_prop + 1; i++){
       poss[i] += poss[i-1];
     }
-    std::cerr << __LINE__ << std::endl;
+    // std::cerr << __LINE__ << std::endl;
     
     int lst = -1;
     for(int32_t i = 0; i<max_prop-min_prop+1; i++){
@@ -250,7 +250,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
 
 
     for(int32_t i = 0; i<max_prop-min_prop+1; i++){
-    std::cerr << __LINE__ << std::endl;
+    // std::cerr << __LINE__ << std::endl;
       
       std::vector<std::vector<int32_t>> residual_histogramm(tree_samples.NumPredictors());
       for(size_t j = 0; j < tree_samples.NumPredictors(); j++){
@@ -280,7 +280,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
         dp[i] += dp[i-1] + split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim, exist[i] + min_prop))+1) + split_cost + rec_mul*depth;
       }
       opt_split[i] = exist[i];
-    std::cerr << __LINE__ << std::endl;
+    // std::cerr << __LINE__ << std::endl;
       
       for(int32_t j = i-1; j >= 0; j--){
         for(size_t pred_i = 0; pred_i < tree_samples.NumPredictors(); pred_i++){
@@ -300,7 +300,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
           pred_split[i] = split_pred;
         }
       }
-    std::cerr << __LINE__ << std::endl;
+    // std::cerr << __LINE__ << std::endl;
 
     }
   
