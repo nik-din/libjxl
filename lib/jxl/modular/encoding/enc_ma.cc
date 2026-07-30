@@ -183,6 +183,7 @@ float split_cost_f(size_t depth, int32_t x, TreeSamples& tree_samples, size_t di
 void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, size_t depth){
   //l and r are the indices of the range of "needed" pixels in tree samples [,)
   if(0 == tree_samples.NumProperties())return;
+  if(r<=l) return;
 
   float best_cost = -1;
   size_t best_property = 0;
@@ -417,6 +418,9 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     if (info.begin == info.end){
       if(info.begin==0 && best_cutoffs[0] > 0){
         oned_split_rec(tree_samples, l, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos, depth+1); 
+      }
+      else if(info.begin==0){
+        continue;
       }
       else if(info.begin==best_cutoffs.size()){
         oned_split_rec(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, r, tree, info.pos, depth+1); 
