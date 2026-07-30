@@ -595,9 +595,7 @@ Status ModularFrameEncoder::Init(const FrameHeader& frame_header,
         cparams_.options.nb_repeats *= 0.3f;
         break;
     }
-    if (cparams_.options.wp_tree_mode == ModularOptions::TreeMode::kGradientOnly){
-      cparams_.options.max_property_values <<= 2;
-    }
+    cparams_.options.max_property_values <<= 2;
     if (cparams_.speed_tier > SpeedTier::kTortoise) {
       // Gradient in previous channels.
       for (int i = 0; i < max_properties; i++) {
