@@ -175,6 +175,7 @@ float rec_mul = -3;
 void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, size_t depth){
   //l and r are the indices of the range of "needed" pixels in tree samples [,)
   std::cerr << __LINE__ << std::endl;
+  if(l == r) return;
   
   if(0 == tree_samples.NumProperties()-tree_samples.NumStaticProps()) return;
 
