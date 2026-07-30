@@ -196,7 +196,6 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     size_t begin = l;
     size_t end = r;
     bool is_static = dim < tree_samples.NumStaticProps();
-    size_t K = tree_samples.NumStaticProps();
 
     auto GetProperty = [&](size_t prop, size_t index)->size_t{
       if(is_static) return tree_samples.Property<true>(prop, index);
@@ -270,7 +269,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     
     for(int32_t i = 0; i<max_prop-min_prop+1; i++){
       
-    std::vector<std::vector<int32_t>> residual_histogramm(tree_samples.NumPredictors());
+      std::vector<std::vector<int32_t>> residual_histogramm(tree_samples.NumPredictors());
       for(size_t j = 0; (size_t)j < tree_samples.NumPredictors(); j++){
         residual_histogramm[j].resize(max_symbols[j], 0);
         for (size_t k = 0; (size_t)k < max_symbols[j]; k++) {
@@ -298,7 +297,6 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
         dp[i] += dp[i-1] + split_cost_f(depth, exist[i], tree_samples, dim, min_prop);
       }
       opt_split[i] = exist[i];
-      
       for(int32_t pred_i = 0; (size_t)pred_i < tree_samples.NumPredictors(); pred_i++){
         int32_t sz = 1; //how many intervals we do have
         for(int32_t k = 0; k<i; k+=std::max(i/sz,1)){
@@ -321,6 +319,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
               if(x11 < dp[i]){
                 dp[i] = x11; 
                 opt_split[i] = exist[x1];
+                pred_split[i] = pred_i;
               }
             }
             else{
@@ -328,6 +327,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
               if(x21 < dp[i]){
                 dp[i] = x21; 
                 opt_split[i] = exist[x2];
+                pred_split[i] = pred_i;
               }
             }
             x1 = (2*ll+rr)/3; x2 = (ll+2*rr)/3;
@@ -349,6 +349,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
           if(new_dp < dp[i]){
             dp[i] = new_dp; 
             opt_split[i] = exist[x1];
+            pred_split[i] = pred_i;
           }
           hist2 = hist[pred_i][i];
           for(size_t h = 0; h<max_symbols[pred_i]; h++){
@@ -364,6 +365,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
           if(new_dp < dp[i]){
             dp[i] = new_dp; 
             opt_split[i] = exist[x2];
+            pred_split[i] = pred_i;
           }
         }
       }
