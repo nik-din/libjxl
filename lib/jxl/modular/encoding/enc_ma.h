@@ -176,7 +176,7 @@ void CollectPixelSamples(const Image &image, const ModularOptions &options,
                          std::vector<pixel_type> &diff_samples);
 
 Status ComputeBestTree(TreeSamples &tree_samples, float threshold,
-                       float nb_repeat,
+                       float nb_repeat, ModularOptions::TreeKind tree_kind,
                        const std::vector<ModularMultiplierInfo> &mul_info,
                        StaticPropRange static_prop_range,
                        float fast_decode_multiplier, Tree *tree);

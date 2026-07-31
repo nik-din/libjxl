@@ -32,6 +32,7 @@
 #include "lib/jxl/modular/encoding/context_predict.h"
 #include "lib/jxl/modular/encoding/dec_ma.h"
 #include "lib/jxl/modular/encoding/enc_ma.h"
+#include "lib/jxl/modular/encoding/enc_debug_tree.h"
 #include "lib/jxl/modular/encoding/encoding.h"
 #include "lib/jxl/modular/encoding/ma_common.h"
 #include "lib/jxl/modular/modular_image.h"
@@ -229,11 +230,17 @@ StatusOr<Tree> LearnTree(
   float pixel_fraction = tree_samples.NumSamples() * 1.0f / total_pixels;
   float required_cost = pixel_fraction * 0.9 + 0.1;
   tree_samples.AllSamplesDone();
-  JXL_RETURN_IF_ERROR(ComputeBestTree(
-      tree_samples, options.splitting_heuristics_node_threshold * required_cost, 
-      options.nb_repeats,
-      multiplier_info, static_prop_range, options.fast_decode_multiplier,
-      &tree));
+  
+  JXL_RETURN_IF_ERROR(
+    ComputeBestTree(tree_samples, 
+                    options.splitting_heuristics_node_threshold * required_cost, 
+                    options.nb_repeats, options.tree_kind,
+                    multiplier_info, static_prop_range, 
+                    options.fast_decode_multiplier,
+                    &tree
+    )
+  );
+  
   return tree;
 }
 
@@ -773,7 +780,8 @@ Status ModularGenericCompress(const Image &image, const ModularOptions &opts,
   if (kWantDebug && kPrintTree && WantDebugOutput(aux_out)) {
     PrintTree(*tree, aux_out->debug_prefix + "/tree_" + ToString(group_id));
   } */
-  
+  PrintTree(tree, "/tmp/tree_" + ToString(group_id));
+
   size_t bits_before_encoding = writer.BitsWritten();
   
   // Write tree

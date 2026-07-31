@@ -173,21 +173,18 @@ const float split_mul_mul = 0.35;
 const float split_compression = 4;
 const float init_split_mul = 32;
 
-void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, float split_mul, float nb_repeats){
+void FindBestCutoffsDp(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, float split_mul, float nb_repeats,
+                      size_t& best_property, std::vector<int32_t>& best_cutoffs, std::vector<int32_t>& best_cutoffs_predictors,
+                      std::vector<int32_t>& best_poss, size_t& best_property_min){
   //l and r are the indices of the range of "needed" pixels in tree samples [,)
   if(l == r) return;
+  std::cerr << __LINE__ << std::endl;
 
   if(0 == tree_samples.NumProperties()-tree_samples.NumStaticProps()) return;
 
   float best_cost = -1;
-  size_t best_property = 0;
-  std::vector<int32_t> best_cutoffs;
-  std::vector<int32_t> best_cutoffs_predictors;
-  std::vector<int32_t> best_poss;
-  size_t best_property_min = -1;
   
   for(size_t dim = 0; dim < tree_samples.NumProperties(); dim++){  
-    // std::cerr << __LINE__ << std::endl;
     bool is_static = dim < tree_samples.NumStaticProps();
 
     auto GetProperty = [&](size_t prop, size_t index)->size_t{
@@ -298,7 +295,6 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
         dp[i] += dp[i-1] + (split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim, exist[i] + min_prop))+1) + split_cost)*split_mul;
       }
       opt_split[i] = exist[i];
-    // std::cerr << __LINE__ << std::endl;
       
       for(int32_t j = i-1; j >= 0; j--){
         for(size_t pred_i = 0; pred_i < tree_samples.NumPredictors(); pred_i++){
@@ -318,7 +314,6 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
           pred_split[i] = split_pred;
         }
       }
-    // std::cerr << __LINE__ << std::endl;
 
     }
   
@@ -342,22 +337,46 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
       best_property_min = min_prop;
     }
   }
+  
+}
 
 
-  if(best_cutoffs.empty()){
-    if(split_mul*split_mul_mul >= 1) oned_split_rec(tree_samples, l, r, tree, tree_pos, split_mul*split_mul_mul, nb_repeats);
-    return;
+void RecursiveSplit(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, float split_mul, float nb_repeats, ModularOptions::TreeKind tree_kind){
+  if(l == r) return;
+
+  if(tree_samples.NumProperties()-tree_samples.NumStaticProps() == 0) return;
+
+  bool is_recursive = tree_kind == ModularOptions::TreeKind::kLearnDp || tree_kind == ModularOptions::TreeKind::kLearnTernary;
+
+  size_t best_property = tree_samples.PropertyFromIndex(0);
+  std::vector<int32_t> best_cutoffs;
+  std::vector<int32_t> best_cutoffs_predictors;
+  std::vector<int32_t> best_poss;
+  size_t best_property_min = -1;
+  // calculate best_cutoffs
+
+  if (tree_kind == ModularOptions::TreeKind::kLearnDp)
+    FindBestCutoffsDp(tree_samples, l, r, tree, tree_pos, split_mul, nb_repeats, 
+                      best_property, best_cutoffs, best_cutoffs_predictors, best_poss,
+                      best_property_min);
+
+  int32_t property = tree_samples.PropertyFromIndex(0);
+
+  if(is_recursive){
+    if(best_cutoffs.empty()){
+      if(split_mul*split_mul_mul >= 1) RecursiveSplit(tree_samples, l, r, tree, tree_pos, split_mul*split_mul_mul, nb_repeats, tree_kind);
+      return;
+    }
+    property = tree_samples.PropertyFromIndex(best_property);
+
+    size_t l1 = l;
+    for(auto&a:best_cutoffs){
+      if(best_property < tree_samples.NumStaticProps()) 
+        SplitTreeSamples<true>(tree_samples, (size_t)l1, (size_t)l+best_poss[a], (size_t)r, (size_t)best_property, (uint32_t) a + best_property_min);
+      else SplitTreeSamples<false>(tree_samples, (size_t)l1, (size_t)l+best_poss[a], (size_t)r, (size_t)best_property - tree_samples.NumStaticProps(), (uint32_t) a + best_property_min);
+      l1 = l+best_poss[a];
+    }
   }
-  int32_t property = tree_samples.PropertyFromIndex(best_property);
-
-  size_t l1 = l;
-  for(auto&a:best_cutoffs){
-    if(best_property < tree_samples.NumStaticProps()) 
-      SplitTreeSamples<true>(tree_samples, (size_t)l1, (size_t)l+best_poss[a], (size_t)r, (size_t)best_property, (uint32_t) a + best_property_min);
-    else SplitTreeSamples<false>(tree_samples, (size_t)l1, (size_t)l+best_poss[a], (size_t)r, (size_t)best_property - tree_samples.NumStaticProps(), (uint32_t) a + best_property_min);
-    l1 = l+best_poss[a];
-  }
-
 
   struct NodeInfo {
     size_t begin, end, pos;
@@ -369,13 +388,17 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     NodeInfo info = q.front();
     q.pop();
     if (info.begin == info.end){
+      if( is_recursive )
+        continue;
+
       if(info.begin==0){
-        if(best_cutoffs[0] > 0) oned_split_rec(tree_samples, l, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos, split_mul, nb_repeats); 
+        if(best_cutoffs[0] > 0) RecursiveSplit(tree_samples, l, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos, split_mul, nb_repeats, tree_kind); 
       }
       else if(info.begin==best_cutoffs.size()){
-        oned_split_rec(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, r, tree, info.pos, split_mul, nb_repeats); 
+        RecursiveSplit(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, r, tree, info.pos, split_mul, nb_repeats, tree_kind); 
       }  
-      else oned_split_rec(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos, split_mul, nb_repeats); 
+      else RecursiveSplit(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos, split_mul, nb_repeats, tree_kind); 
+      
       continue;
     }
     uint32_t split = (info.begin + info.end) / 2;
@@ -391,30 +414,11 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
 }
 
 
-void FindBestCutoff(TreeSamples& tree_samples,
-                    float nb_repeats, Tree* tree) {
-  // Leaf IDs will be set by roundtrip decoding the tree.
-  Predictor pred = tree_samples.PredictorFromIndex(0);
-  tree->back() = PropertyDecisionNode::Leaf(pred);
-  
-  // std::cerr << nb_repeats << std::endl;
-
-  // std::cerr << bit_mul << std::endl;
-
-  oned_split_rec(tree_samples, 0, tree_samples.NumDistinctSamples(), tree, 0, init_split_mul, nb_repeats);
-
-  return;
-  
-}
-
 void FindBestSplit(TreeSamples& tree_samples, float threshold, 
                    float nb_repeat,
                    const std::vector<ModularMultiplierInfo>& mul_info,
                    StaticPropRange initial_static_prop_range,
                    float fast_decode_multiplier, Tree* tree) {
-  //std::cerr<<"Num properties: "<<tree_samples.NumProperties() <<"\n\n";
-  FindBestCutoff(tree_samples, nb_repeat, tree);
-  return;
     
   struct NodeInfo {
     size_t pos;
@@ -758,8 +762,9 @@ HWY_AFTER_NAMESPACE();
 namespace jxl {
 
 HWY_EXPORT(FindBestSplit);  // Local function.
+HWY_EXPORT(RecursiveSplit);
 
-Status ComputeBestTree(TreeSamples& tree_samples, float threshold, float nb_repeat,
+Status ComputeBestTree(TreeSamples& tree_samples, float threshold, float nb_repeat, ModularOptions::TreeKind tree_kind,
                        const std::vector<ModularMultiplierInfo>& mul_info,
                        StaticPropRange static_prop_range,
                        float fast_decode_multiplier, Tree* tree) {
@@ -777,9 +782,15 @@ Status ComputeBestTree(TreeSamples& tree_samples, float threshold, float nb_repe
   JXL_ENSURE(tree_samples.NumDistinctSamples() <=
              std::numeric_limits<uint32_t>::max());
 
-  HWY_DYNAMIC_DISPATCH(FindBestSplit)
-  (tree_samples, threshold, nb_repeat, mul_info, static_prop_range, fast_decode_multiplier,
-   tree);
+  tree_kind = ModularOptions::TreeKind::kLearnDp;
+
+  if(tree_kind == ModularOptions::TreeKind::kLearn)
+    HWY_DYNAMIC_DISPATCH(FindBestSplit)
+    (tree_samples, threshold, nb_repeat, mul_info, static_prop_range, fast_decode_multiplier,
+    tree);
+  else 
+    HWY_DYNAMIC_DISPATCH(RecursiveSplit)
+    (tree_samples, 0, tree_samples.NumDistinctSamples(), tree, 0, HWY_NAMESPACE::init_split_mul, nb_repeat, tree_kind);
 
   return true;
 }
