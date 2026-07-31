@@ -408,9 +408,9 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
   size_t l1 = l;
   for(auto&a:best_cutoffs){
     if(best_property < tree_samples.NumStaticProps()) 
-      SplitTreeSamples<true>(tree_samples, (size_t)l1, (size_t)l+best_poss[a], (size_t)r, (size_t)best_property, (uint32_t) a + best_min);
+      SplitTreeSamples<true>(tree_samples, l1, l+best_poss[a], r, best_property, a + best_min);
     else 
-      SplitTreeSamples<false>(tree_samples, (size_t)l1, (size_t)l+best_poss[a], (size_t)r, (size_t)best_property - tree_samples.NumStaticProps(), (uint32_t) a + best_min);
+      SplitTreeSamples<false>(tree_samples, l1, l+best_poss[a], r, best_property - tree_samples.NumStaticProps(), a + best_min);
     l1 = l+best_poss[a];
   }
 
