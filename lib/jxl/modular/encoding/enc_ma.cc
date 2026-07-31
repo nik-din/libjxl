@@ -167,11 +167,11 @@ void CollectExtraBitsIncrease(TreeSamples& tree_samples,
   }
 }
 
-const float split_cost = 42; 
-const float split_compression = 2;
-const float init_split_mul = 128;
-const float split_mul_mul = 0.8;
 const float bit_mul = 1;
+const float split_cost = 110; 
+const float split_mul_mul = 0.35;
+const float split_compression = 4;
+const float init_split_mul = 32;
 
 void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, float split_mul, float nb_repeats){
   //l and r are the indices of the range of "needed" pixels in tree samples [,)
