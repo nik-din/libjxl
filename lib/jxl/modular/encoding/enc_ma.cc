@@ -68,6 +68,7 @@ float EstimateBits(const int32_t* counts, size_t num_symbols) {  //
   total_v = SumOfLanes(di, total_v);
 
   const auto minprob = Set(df, 1.0f / ANS_TAB_SIZE);
+  if(GetLane(total_v)==0)return 0;
   const auto inv_total = Set(df, 1.0f / GetLane(total_v));
   auto bits_lanes = Zero(df);
   for (size_t i = 0; i < num_symbols; i += Lanes(df)) {
@@ -233,7 +234,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
         size_t prop = GetProperty(dim, i) - min_prop;
         pref_extra_bits[pred][prop] += eb;
       }
-      for(size_t i = 1; i < max_prop - min_prop + 1; i++) pref_extra_bits[pred][i] += pref_extra_bits[pred][i-1];
+      for(size_t i = 1; (int32_t) i < max_prop - min_prop + 1; i++) pref_extra_bits[pred][i] += pref_extra_bits[pred][i-1];
     }
 
     std::vector<int32_t> poss (max_prop-min_prop+1, 0); //vector of pos needed for the SplitTreeSamles function (things with prop <= val)
@@ -298,7 +299,8 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
         float curr_split_cost = -1;
         size_t pred = -1;
         for(size_t j = 0; j < tree_samples.NumPredictors(); j++){
-          float curr_pred_cost = bit_mul*EstimateBits(residual_histogramm[j].data(), max_symbols[j]);
+          float curr_pred_cost = 0;
+          if(!residual_histogramm.empty()) curr_pred_cost+= bit_mul*EstimateBits(residual_histogramm[j].data(), max_symbols[j]);
           curr_pred_cost += pref_extra_bits[j][right] - (left > 0 ? pref_extra_bits[j][left-1] : 0);
           if(curr_split_cost == -1 || curr_pred_cost < curr_split_cost){
             curr_split_cost = curr_pred_cost;
@@ -328,9 +330,9 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
               if(x1>0)hist1[i1]-=hist[pred_i][x1-1][i1];
               if(x2>0)hist2[i1]-=hist[pred_i][x2-1][i1];
             }
-            x11 = EstimateBits(hist1.data(), max_symbols[pred_i]);
+            x11 = (hist1.empty()?0:EstimateBits(hist1.data(), max_symbols[pred_i]));
             x11 += pref_extra_bits[pred_i][i] - (x1>0 ? pref_extra_bits[pred_i][x1-1] : 0);
-            x21 = EstimateBits(hist2.data(), max_symbols[pred_i]);
+            x21 = (hist2.empty()?0:EstimateBits(hist2.data(), max_symbols[pred_i]));
             x21 += pref_extra_bits[pred_i][i] - (x2>0 ? pref_extra_bits[pred_i][x2-1] : 0);
             if(x1>0 && exist[x1]!=-1)x11+=dp[x1-1]+split_cost_f(depth, exist[x1], tree_samples, dim, min_prop, ratio);
             if(x2>0 && exist[x2]!=-1)x21+=dp[x2-1]+split_cost_f(depth, exist[x2], tree_samples, dim, min_prop, ratio);
@@ -359,7 +361,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
           for(size_t h = 0; h<max_symbols[pred_i]; h++){
             if(x1>0) hist1[h] -= hist[pred_i][x1-1][h];
           }
-          curr_split_cost = bit_mul*EstimateBits(hist1.data(), max_symbols[pred_i]);
+          curr_split_cost = (hist1.empty()?0:EstimateBits(hist1.data(), max_symbols[pred_i]));
           curr_split_cost += pref_extra_bits[pred_i][i] - (x1>0 ? pref_extra_bits[pred_i][x1-1] : 0);
 
           float new_dp = curr_split_cost;
@@ -376,7 +378,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
             if(x2>0)hist2[h] -= hist[pred_i][x2-1][h];
           }
 
-          curr_split_cost = bit_mul*EstimateBits(hist2.data(), max_symbols[pred_i]);
+          curr_split_cost = (hist2.empty()?0:EstimateBits(hist2.data(), max_symbols[pred_i]));
           curr_split_cost += pref_extra_bits[pred_i][i] - (x2>0 ? pref_extra_bits[pred_i][x2-1] : 0);
 
           new_dp = curr_split_cost;
