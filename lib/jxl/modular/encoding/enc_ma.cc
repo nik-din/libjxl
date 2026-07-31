@@ -1275,8 +1275,6 @@ Status ComputeBestTree(TreeSamples& tree_samples, float threshold, float nb_repe
   JXL_ENSURE(tree_samples.NumDistinctSamples() <=
              std::numeric_limits<uint32_t>::max());
 
-  tree_kind = ModularOptions::TreeKind::kLearnTernary;
-
   if(tree_kind == ModularOptions::TreeKind::kLearn)
     HWY_DYNAMIC_DISPATCH(FindBestSplit)
     (tree_samples, threshold, nb_repeat, mul_info, static_prop_range, fast_decode_multiplier,
