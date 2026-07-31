@@ -167,17 +167,16 @@ void CollectExtraBitsIncrease(TreeSamples& tree_samples,
   }
 }
 
-float split_cost = 42; 
-float split_compression = 2;
-float init_split_mul = 120;
-float split_mul_mul = 0.8;
-float bit_mul = 1;
-float rec_mul = -6;
+const float split_cost = 42; 
+const float split_compression = 2;
+const float init_split_mul = 128;
+const float split_mul_mul = 0.8;
+const float bit_mul = 1;
 
-void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, float split_mul){
+void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, float split_mul, float nb_repeats){
   //l and r are the indices of the range of "needed" pixels in tree samples [,)
   if(l == r) return;
-  
+
   if(0 == tree_samples.NumProperties()-tree_samples.NumStaticProps()) return;
 
   float best_cost = -1;
@@ -185,6 +184,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
   std::vector<int32_t> best_cutoffs;
   std::vector<int32_t> best_cutoffs_predictors;
   std::vector<int32_t> best_poss;
+  size_t best_property_min = -1;
   
   for(size_t dim = 0; dim < tree_samples.NumProperties(); dim++){  
     // std::cerr << __LINE__ << std::endl;
@@ -208,8 +208,8 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
       max_symbols[j] = Padded(max_symbols[j]);
     }
     
-    int32_t max_prop = 0;
-    int32_t min_prop = 0;
+    int32_t max_prop = -1e9;
+    int32_t min_prop = 1e9;
     for(size_t i = begin; i<end; i++){
       max_prop = std::max(max_prop, (int32_t) GetProperty(dim, i));
       min_prop = std::min(min_prop, (int32_t) GetProperty(dim, i));
@@ -280,8 +280,9 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
         float curr_split_cost = -1;
         size_t pred = -1;
         for(size_t j = 0; j < tree_samples.NumPredictors(); j++){
-          float curr_pred_cost = bit_mul*EstimateBits(residual_histogramm[j].data(), max_symbols[j]);
+          float curr_pred_cost = EstimateBits(residual_histogramm[j].data(), max_symbols[j]);
           curr_pred_cost += pref_extra_bits[j][right] - (left > 0 ? pref_extra_bits[j][left-1] : 0);
+          curr_pred_cost *= bit_mul/nb_repeats;
           if(curr_split_cost == -1 || curr_pred_cost < curr_split_cost){
             curr_split_cost = curr_pred_cost;
             pred = j;
@@ -326,7 +327,7 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     cutoffs_predictors.push_back(pred_split[max_prop-min_prop]);
     int32_t curr = opt_split[max_prop-min_prop];
     while(curr != -1){
-      cutoffs.push_back(curr + min_prop);
+      cutoffs.push_back(curr);
       cutoffs_predictors.push_back(pred_split[curr]);
       curr = opt_split[curr];
     }
@@ -338,12 +339,13 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
       best_cutoffs = cutoffs;
       best_cutoffs_predictors = cutoffs_predictors;
       best_poss = poss;
+      best_property_min = min_prop;
     }
   }
 
 
   if(best_cutoffs.empty()){
-    if(split_mul*split_mul_mul >= 1) oned_split_rec(tree_samples, l, r, tree, tree_pos, split_mul*split_mul_mul);
+    if(split_mul*split_mul_mul >= 1) oned_split_rec(tree_samples, l, r, tree, tree_pos, split_mul*split_mul_mul, nb_repeats);
     return;
   }
   int32_t property = tree_samples.PropertyFromIndex(best_property);
@@ -351,8 +353,8 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
   size_t l1 = l;
   for(auto&a:best_cutoffs){
     if(best_property < tree_samples.NumStaticProps()) 
-      SplitTreeSamples<true>(tree_samples, (size_t)l1, (size_t)l+best_poss[a], (size_t)r, (size_t)best_property, (uint32_t) a);
-    else SplitTreeSamples<false>(tree_samples, (size_t)l1, (size_t)l+best_poss[a], (size_t)r, (size_t)best_property - tree_samples.NumStaticProps(), (uint32_t) a);
+      SplitTreeSamples<true>(tree_samples, (size_t)l1, (size_t)l+best_poss[a], (size_t)r, (size_t)best_property, (uint32_t) a + best_property_min);
+    else SplitTreeSamples<false>(tree_samples, (size_t)l1, (size_t)l+best_poss[a], (size_t)r, (size_t)best_property - tree_samples.NumStaticProps(), (uint32_t) a + best_property_min);
     l1 = l+best_poss[a];
   }
 
@@ -368,16 +370,16 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     q.pop();
     if (info.begin == info.end){
       if(info.begin==0){
-        if(best_cutoffs[0] > 0) oned_split_rec(tree_samples, l, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos, split_mul); 
+        if(best_cutoffs[0] > 0) oned_split_rec(tree_samples, l, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos, split_mul, nb_repeats); 
       }
       else if(info.begin==best_cutoffs.size()){
-        oned_split_rec(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, r, tree, info.pos, split_mul); 
+        oned_split_rec(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, r, tree, info.pos, split_mul, nb_repeats); 
       }  
-      else oned_split_rec(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos, split_mul); 
+      else oned_split_rec(tree_samples, l+best_poss[best_cutoffs[info.begin-1]]+1, l+best_poss[best_cutoffs[info.begin]-1]+1, tree, info.pos, split_mul, nb_repeats); 
       continue;
     }
     uint32_t split = (info.begin + info.end) / 2;
-    int32_t cutoff = tree_samples.UnquantizeProperty(best_property, best_cutoffs[split]);
+    int32_t cutoff = tree_samples.UnquantizeProperty(best_property, best_cutoffs[split] + best_property_min);
     (*tree)[info.pos] = PropertyDecisionNode::Split(property, cutoff, tree->size());
     q.push(NodeInfo{split + 1, info.end, tree->size()});
     tree->push_back(PropertyDecisionNode::Leaf(tree_samples.PredictorFromIndex(best_cutoffs_predictors[split+1])));
@@ -388,16 +390,19 @@ void oned_split_rec(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
   return;
 }
 
+
 void FindBestCutoff(TreeSamples& tree_samples,
                     float nb_repeats, Tree* tree) {
   // Leaf IDs will be set by roundtrip decoding the tree.
   Predictor pred = tree_samples.PredictorFromIndex(0);
   tree->back() = PropertyDecisionNode::Leaf(pred);
-  split_cost *= nb_repeats;
-  split_compression *= nb_repeats;
-  rec_mul *= nb_repeats;
+  
+  // std::cerr << nb_repeats << std::endl;
 
-  oned_split_rec(tree_samples, 0, tree_samples.NumDistinctSamples(), tree, 0, init_split_mul);
+  // std::cerr << bit_mul << std::endl;
+
+  oned_split_rec(tree_samples, 0, tree_samples.NumDistinctSamples(), tree, 0, init_split_mul, nb_repeats);
+
   return;
   
 }
