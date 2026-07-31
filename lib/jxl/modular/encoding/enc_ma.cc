@@ -170,8 +170,9 @@ void CollectExtraBitsIncrease(TreeSamples& tree_samples,
 const float bit_mul = 1;
 
 const float split_cost = 80;
-const float split_mul = 0.6;
+const float split_mul = 0.25;
 const float split_compression = 4;
+const float init_split_cost = 42;
 const float rec_mul = 0; 
 const float sq_rec = 0;
 int32_t deep = 0;
@@ -470,7 +471,7 @@ void FindBestCutoff(TreeSamples& tree_samples,
   Predictor pred = tree_samples.PredictorFromIndex(0);
   tree->back() = PropertyDecisionNode::Leaf(pred);
   
-  oned_split_rec(tree_samples, 0, tree_samples.NumDistinctSamples(), tree, 0, 0, 64);
+  oned_split_rec(tree_samples, 0, tree_samples.NumDistinctSamples(), tree, 0, 0, init_split_cost);
   return;
   
 }
