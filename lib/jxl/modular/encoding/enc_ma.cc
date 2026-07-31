@@ -187,8 +187,6 @@ void FindBestCutoffsDp(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tr
 
   if (l == r) return;
 
-  if (tree_samples.NumProperties() - tree_samples.NumStaticProps() == 0) return;
-
   float best_cost = -1;
   
   for (size_t dim = 0; dim < tree_samples.NumProperties(); dim++) {  
@@ -374,7 +372,7 @@ void FindBestCutoffsDp(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tr
 
 
 void RecursiveSplit(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, float split_mul, float nb_repeats, ModularOptions::TreeKind tree_kind){
-  if(l == r) return;
+  if(l >= r) return;
 
   if(tree_samples.NumProperties()-tree_samples.NumStaticProps() == 0) return;
 
@@ -401,7 +399,7 @@ void RecursiveSplit(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
         RecursiveSplit(tree_samples, l, r, tree, tree_pos, split_mul * SplitConst::split_mul_mul, nb_repeats, tree_kind);
       return;
     }
-    const int32_t property = tree_samples.PropertyFromIndex(best_property);
+    property = tree_samples.PropertyFromIndex(best_property);
     size_t l1 = l;
 
     for (auto &a: best_cutoffs) {
@@ -415,11 +413,8 @@ void RecursiveSplit(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     }
   }
 
-  std::cerr << __LINE__ << std::endl;
-  for(int i: best_cutoffs) std::cerr << i << ' '; std::cerr << std::endl;
-  for(int i: best_cutoffs_predictors) std::cerr << i << ' '; std::cerr << std::endl;
-  for(int i: best_poss) std::cerr << i << ' '; std::cerr << std::endl;
-  std::cerr << is_recursive << std::endl;
+  if(best_cutoffs.empty()) return;
+
 
   struct NodeInfo {
     size_t begin, end, pos;
