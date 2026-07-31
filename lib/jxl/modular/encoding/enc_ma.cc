@@ -68,7 +68,6 @@ float EstimateBits(const int32_t* counts, size_t num_symbols) {  //
   total_v = SumOfLanes(di, total_v);
 
   const auto minprob = Set(df, 1.0f / ANS_TAB_SIZE);
-  if(GetLane(total_v)==0)return 0;
   const auto inv_total = Set(df, 1.0f / GetLane(total_v));
   auto bits_lanes = Zero(df);
   for (size_t i = 0; i < num_symbols; i += Lanes(df)) {
