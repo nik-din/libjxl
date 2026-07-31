@@ -370,6 +370,228 @@ void FindBestCutoffsDp(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tr
   
 }
 
+float split_cost_f(int32_t x, TreeSamples& tree_samples, size_t dim, int32_t m_prop, float ratio){
+  return SplitConst::split_compression*FastLog2f(std::abs(tree_samples.UnquantizeProperty(dim, x + m_prop))+1) + SplitConst::split_cost*ratio;
+}
+
+void FindBestCutoffsTernary(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, float ratio, float nb_repeats,
+                            size_t& best_property, std::vector<int32_t>& best_cutoffs, std::vector<int32_t>& best_cutoffs_predictors,
+                            std::vector<int32_t>& best_poss, size_t& best_property_min){
+  //l and r are the indices of the range of "needed" pixels in tree samples [,)
+  //tree_pos is the position in the tree from which the children in this range
+  if(0 == tree_samples.NumProperties())return;
+  if(r<=l) return;
+
+  float best_cost = -1;
+  
+  for(size_t dim = 0; dim < tree_samples.NumProperties(); dim++){  
+  
+    size_t begin = l;
+    size_t end = r;
+    bool is_static = dim < tree_samples.NumStaticProps();
+
+    auto GetProperty = [&](size_t prop, size_t index)->size_t{
+      if(is_static) return tree_samples.Property<true>(prop, index);
+      return tree_samples.Property<false>(prop - tree_samples.NumStaticProps(), index);
+    };
+    
+    std::vector<size_t> max_symbols(tree_samples.NumPredictors(), 0);
+                        
+    for(size_t j =0; j < tree_samples.NumPredictors(); j++){
+      for (size_t i = begin; i < end; i++) {
+        uint32_t tok = tree_samples.Token(j, i);
+        max_symbols[j] = max_symbols[j] > tok + 1 ? max_symbols[j] : tok + 1;
+      }
+      max_symbols[j] = Padded(max_symbols[j]);
+    }
+    
+    int32_t max_prop = -1000000000;
+    int32_t min_prop = 100000000;
+
+    for(size_t i = begin; i<end; i++){
+      max_prop = std::max(max_prop, (int32_t) GetProperty(dim, i));
+      min_prop = std::min(min_prop, (int32_t) GetProperty(dim, i));
+    }
+
+    std::vector<std::vector<int32_t>> pref_extra_bits(tree_samples.NumPredictors(), std::vector<int32_t>(max_prop-min_prop+1, 0)); 
+
+    for (size_t pred = 0; pred < tree_samples.NumPredictors(); pred++) {
+      const std::vector<ResidualToken>& rtokens = tree_samples.RTokens(pred);
+      for (size_t i = begin; i < end; i++) {
+        const ResidualToken& rt = rtokens[i];
+        size_t count = tree_samples.Count(i);
+        size_t eb = rt.nbits * count;
+        size_t prop = GetProperty(dim, i) - min_prop;
+        pref_extra_bits[pred][prop] += eb;
+      }
+      for(size_t i = 1; (int32_t) i < max_prop - min_prop + 1; i++) pref_extra_bits[pred][i] += pref_extra_bits[pred][i-1];
+    }
+
+    std::vector<int32_t> poss (max_prop-min_prop+1, 0); //vector of pos needed for the SplitTreeSamles function (things with prop <= val)
+    std::vector<std::vector<std::vector<int32_t>>> freq(max_prop-min_prop+1, std::vector<std::vector<int32_t>>(tree_samples.NumPredictors())); // [property][predictor] 
+    std::vector<int32_t> exist(max_prop-min_prop+1, 0); // last previous existing property, -1 if there isn't
+
+    
+    for(size_t j = 0; j < tree_samples.NumPredictors(); j++){
+      for(int32_t i = 0; i<max_prop-min_prop+1; i++){
+        freq[i][j].resize(max_symbols[j], 0);
+      }
+      for(size_t i = begin; i < end; i++){
+        int32_t prp = GetProperty(dim, i);
+        freq[prp-min_prop][j][tree_samples.Token(j, i)]+=tree_samples.Count(i);
+        exist[prp-min_prop] = 1;
+        if(j == 0) poss[prp-min_prop]++;
+      }
+    }
+
+    for(int32_t i = 1; i < max_prop - min_prop + 1; i++){
+      poss[i] += poss[i-1];
+    }
+    
+    int lst = -1;
+    for(int32_t i = 0; i<max_prop-min_prop+1; i++){
+      if(exist[i]){
+        exist[i] = lst; lst = i;
+      }
+      else exist[i] = lst;
+    }
+
+    std::vector<float> dp(max_prop-min_prop+1, 0);
+    std::vector<int32_t> opt_split(max_prop-min_prop+1);
+    std::vector<size_t> pred_split(max_prop-min_prop+1);
+    std::vector<std::vector<std::vector<int32_t>>> hist; // [property][predictor][residual] 
+    hist = freq;
+    
+    for(int32_t h = 0; (size_t)h < tree_samples.NumPredictors(); h++){
+      for(int32_t i = 1; i < max_prop-min_prop+1; i++){
+        for(int32_t j = 0; (size_t)j < max_symbols[h]; j++){
+          hist[i][h][j]+=hist[i-1][h][j];
+        }
+      }
+    }
+
+    for(int32_t i = 0; i<max_prop-min_prop+1; i++){
+       
+      auto calc_costs = [&](size_t left, size_t right, std::vector<std::vector<int32_t>> histogram)->std::pair<float, size_t>{ // [left, right]
+        float curr_split_cost = -1;
+        size_t pred = -1;
+        for(size_t j = 0; j < tree_samples.NumPredictors(); j++){
+          float curr_pred_cost = 0;
+          if(!histogram.empty()) curr_pred_cost += EstimateBits(histogram[j].data(), max_symbols[j]);
+          curr_pred_cost += pref_extra_bits[j][right] - (left > 0 ? pref_extra_bits[j][left-1] : 0);
+          curr_pred_cost/=nb_repeats;
+          if(curr_split_cost == -1 || curr_pred_cost < curr_split_cost){
+            curr_split_cost = curr_pred_cost;
+            pred = j;
+          }
+        }
+        return {curr_split_cost, pred};
+      };
+
+      auto [c_split_cost, split_pred] = calc_costs(i, i, freq[i]);
+      pred_split[i] = split_pred;
+      dp[i] = c_split_cost;
+      if(i > 0 && exist[i] != -1){
+        dp[i] += dp[i-1] + split_cost_f(exist[i], tree_samples, dim, min_prop, ratio);
+      }
+      opt_split[i] = exist[i];
+      
+      int32_t sz = 1; //number of intervals in which the range is split to run the ternary search on
+      for(int32_t k = 0; k<i; k+=std::max(i/sz,1)){
+        int32_t ll,rr,x1,x2;
+        ll = k; rr = std::min(k+(i/sz),i); x1 = (2*ll+rr)/3; x2 = (ll+2*rr)/3;
+        std::vector<std::vector<int32_t>> hist1=hist[i];
+        std::vector<std::vector<int32_t>> hist2=hist[i];
+        while(x2-x1>1){
+          for(size_t pred_i = 0; pred_i < tree_samples.NumPredictors(); pred_i++){
+            for(int32_t i1 = 0; (size_t)i1<max_symbols[pred_i]; i1++){
+              if(x1>0)hist1[pred_i][i1]-=hist[x1-1][pred_i][i1];
+              if(x2>0)hist2[pred_i][i1]-=hist[x2-1][pred_i][i1];
+            }
+          }
+          auto[x11, pred1] = calc_costs(x1, i, hist1);
+          auto[x21, pred2] = calc_costs(x2, i, hist2);
+
+          if(x1>0 && exist[x1]!=-1)
+            x11+=dp[x1-1]+split_cost_f(exist[x1], tree_samples, dim, min_prop, ratio);
+          if(x2>0 && exist[x2]!=-1)
+            x21+=dp[x2-1]+split_cost_f(exist[x2], tree_samples, dim, min_prop, ratio);
+          if(x11>x21){
+            ll = x1;
+            if(x11 < dp[i]){
+              dp[i] = x11; 
+              opt_split[i] = exist[x1];
+              pred_split[i] = pred1;
+            }
+          }
+          else{
+            rr = x2+1;
+            if(x21 < dp[i]){
+              dp[i] = x21; 
+              opt_split[i] = exist[x2];
+              pred_split[i] = pred2;
+            }
+          }
+          x1 = (2*ll+rr)/3; x2 = (ll+2*rr)/3;
+          hist1=hist[i];
+          hist2=hist[i];
+        }
+
+        hist1 = hist[i];
+        hist2 = hist[i];
+        for(size_t pred_i = 0; pred_i < tree_samples.NumPredictors(); pred_i++){
+          for(int32_t i1 = 0; (size_t)i1<max_symbols[pred_i]; i1++){
+            if(x1>0)hist1[pred_i][i1]-=hist[x1-1][pred_i][i1];
+            if(x2>0)hist2[pred_i][i1]-=hist[x2-1][pred_i][i1];
+          }
+        }
+
+        auto [curr_split_cost1, pred1] = calc_costs(x1, i, hist1);
+
+        float new_dp = curr_split_cost1;
+        if(x1 > 0 && exist[x1] != -1){
+          new_dp += dp[x1-1] + split_cost_f(exist[x1], tree_samples, dim, min_prop, ratio);
+        }
+        if(new_dp < dp[i]){
+          dp[i] = new_dp; 
+          opt_split[i] = exist[x1];
+          pred_split[i] = pred1;
+        }
+
+        auto [curr_split_cost2, pred2] = calc_costs(x2, i, hist2);
+
+        new_dp = curr_split_cost2;
+        if(x2 > 0 && exist[x2] != -1){
+          new_dp += dp[x2-1] + split_cost_f(exist[x2], tree_samples, dim, min_prop, ratio);
+        }
+        if(new_dp < dp[i]){
+          dp[i] = new_dp; 
+          opt_split[i] = exist[x2];
+          pred_split[i] = pred2;
+        }
+      }
+    }
+    std::vector<int32_t> cutoffs;
+    std::vector<int32_t> cutoffs_predictors;
+    cutoffs_predictors.push_back(pred_split[max_prop-min_prop]);
+    int32_t curr = opt_split[max_prop-min_prop];
+    while(curr != -1){
+      cutoffs.push_back(curr);
+      cutoffs_predictors.push_back(pred_split[curr]);
+      curr = opt_split[curr];
+    }
+    std::sort(cutoffs.begin(), cutoffs.end());
+    std::reverse(cutoffs_predictors.begin(), cutoffs_predictors.end());
+    if(best_cost == -1 || dp.back() < best_cost){
+      best_cost = dp.back();
+      best_property = dim;
+      best_cutoffs = cutoffs;
+      best_cutoffs_predictors = cutoffs_predictors;
+      best_poss = poss;
+      best_property_min = min_prop;
+    }
+  }
+}
 
 void RecursiveSplit(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree, size_t tree_pos, float split_mul, float nb_repeats, ModularOptions::TreeKind tree_kind){
   if(l >= r) return;
@@ -389,6 +611,10 @@ void RecursiveSplit(TreeSamples& tree_samples, int32_t l, int32_t r, Tree* tree,
     FindBestCutoffsDp(tree_samples, l, r, tree, tree_pos, split_mul, nb_repeats, 
                       best_property, best_cutoffs, best_cutoffs_predictors, best_poss,
                       best_property_min);
+  else if (tree_kind == ModularOptions::TreeKind::kLearnTernary)
+    FindBestCutoffsTernary(tree_samples, l, r, tree, tree_pos, split_mul, nb_repeats, 
+                    best_property, best_cutoffs, best_cutoffs_predictors, best_poss,
+                    best_property_min);
 
   int32_t property = tree_samples.PropertyFromIndex(0);
 
@@ -825,7 +1051,7 @@ Status ComputeBestTree(TreeSamples& tree_samples, float threshold, float nb_repe
   JXL_ENSURE(tree_samples.NumDistinctSamples() <=
              std::numeric_limits<uint32_t>::max());
 
-  tree_kind = ModularOptions::TreeKind::kLearnDp;
+  tree_kind = ModularOptions::TreeKind::kLearnTernary;
 
   if(tree_kind == ModularOptions::TreeKind::kLearn)
     HWY_DYNAMIC_DISPATCH(FindBestSplit)
