@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include<iostream>
 
 #include "lib/jxl/base/common.h"
 #include "lib/jxl/base/status.h"
@@ -73,6 +74,7 @@ struct TreeSamples {
       return props[property_index][i];
     }
   }
+
   int UnquantizeProperty(size_t property_index, uint32_t quant) const {
     JXL_DASSERT(quant < compact_properties[property_index].size());
     return compact_properties[property_index][quant];
@@ -174,6 +176,7 @@ void CollectPixelSamples(const Image &image, const ModularOptions &options,
                          std::vector<pixel_type> &diff_samples);
 
 Status ComputeBestTree(TreeSamples &tree_samples, float threshold,
+                       float nb_repeat, ModularOptions::TreeKind tree_kind,
                        const std::vector<ModularMultiplierInfo> &mul_info,
                        StaticPropRange static_prop_range,
                        float fast_decode_multiplier, Tree *tree);
