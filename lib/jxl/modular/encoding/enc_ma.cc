@@ -323,7 +323,7 @@ void FindBestCutoffsDp(TreeSamples& tree_samples, int32_t l, int32_t r,
 
       opt_split[i] = exist[i];
 
-      for (size_t j = i - 1; j >= 0; j--) {
+      for (int32_t j = i - 1; j >= 0; j--) {
         for (size_t pred_i = 0; pred_i < tree_samples.NumPredictors(); pred_i++) {
           for (size_t k = 0; k < max_symbols[pred_i]; k++){
             residual_histogram[pred_i][k] += freq[pred_i][j][k];
@@ -756,7 +756,7 @@ void FindBestCutoffs(TreeSamples& tree_samples, float nb_repeats, Tree* tree,
     }
     opt_split[i] = exist[i];
 
-    for (size_t j = i - 1; j >= 0; j--) {
+    for (int32_t j = i - 1; j >= 0; j--) {
       for (size_t pred_i = 0; pred_i < tree_samples.NumPredictors(); pred_i++) {
         for (size_t k = 0; k < max_symbols[pred_i]; k++) {
           residual_histogram[pred_i][k] += freq[pred_i][j][k];
@@ -783,6 +783,8 @@ void FindBestCutoffs(TreeSamples& tree_samples, float nb_repeats, Tree* tree,
       }
     }
   }
+
+  if(pred_split.empty()) return;
 
   std::vector<int32_t> cutoffs, cutoffs_predictors;
 
@@ -1275,7 +1277,7 @@ Status ComputeBestTree(TreeSamples& tree_samples, float threshold, float nb_repe
   JXL_ENSURE(tree_samples.NumDistinctSamples() <=
              std::numeric_limits<uint32_t>::max());
 
-  tree_kind = ModularOptions::TreeKind::kLearnDp;
+  // tree_kind = ModularOptions::TreeKind::kLearnDp;
 
   if(tree_kind == ModularOptions::TreeKind::kLearn)
     HWY_DYNAMIC_DISPATCH(FindBestSplit)
